@@ -1,7 +1,35 @@
 @import "tailwindcss";
 
-/* ── design tokens — Elecbits PMS design system (dark, blue-tinted) ─────── */
+/* ── design tokens — Elecbits PMS design system ─────────────────────────
+   Light is the DEFAULT; [data-theme="dark"] switches the full palette.
+   Both sets come verbatim from the PMS ODM app. */
 :root {
+  --bg: #f8fafc;
+  --s1: #ffffff;
+  --s2: #f1f5f9;
+  --s3: #e2e8f0;
+  --bdr: #e2e8f0;
+  --bdr2: #cbd5e1;
+  --txt: #1e293b;
+  --txt2: #64748b;
+  --txt3: #94a3b8;
+  --acc: #2563eb;
+  --soft: #eff6ff;
+  --green: #16a34a;
+  --red: #dc2626;
+  --amber: #d97706;
+  --purple: #7c3aed;
+  --coral: #ea580c;
+  --mono: var(--font-mono), "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --logo-chip: #ffffff;
+  --page-glow:
+    radial-gradient(1100px 560px at 88% -10%, rgba(37, 99, 235, 0.05), transparent 60%),
+    radial-gradient(900px 520px at -12% 110%, rgba(124, 58, 237, 0.04), transparent 60%);
+  --chat-shadow: 0 24px 80px rgba(15, 23, 42, 0.1);
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
   --bg: #0c0e13;
   --s1: #111520;
   --s2: #161c2a;
@@ -18,7 +46,11 @@
   --amber: #d97706;
   --purple: #7c3aed;
   --coral: #ea580c;
-  --mono: var(--font-mono), "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --logo-chip: #f4f6fa;
+  --page-glow:
+    radial-gradient(1100px 560px at 88% -10%, rgba(37, 99, 235, 0.08), transparent 60%),
+    radial-gradient(900px 520px at -12% 110%, rgba(124, 58, 237, 0.05), transparent 60%);
+  --chat-shadow: 0 24px 80px rgba(0, 0, 0, 0.4);
   color-scheme: dark;
 }
 
@@ -30,10 +62,11 @@ body {
 body {
   margin: 0;
   background-color: var(--bg);
-  background-image:
-    radial-gradient(1100px 560px at 88% -10%, rgba(37, 99, 235, 0.08), transparent 60%),
-    radial-gradient(900px 520px at -12% 110%, rgba(124, 58, 237, 0.05), transparent 60%);
+  background-image: var(--page-glow);
   color: var(--txt);
+  transition:
+    background-color 0.25s,
+    color 0.25s;
   font:
     14px/1.55 -apple-system,
     BlinkMacSystemFont,
@@ -137,15 +170,15 @@ button {
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
-/* The Elecbits wordmark is black+blue on transparency — it needs a light
-   chip to stay legible on the dark theme. */
+/* The Elecbits wordmark is black+blue on transparency — the chip stays
+   light in BOTH themes so the black mark is always legible. */
 .mark .by-logo {
   align-self: center;
   display: inline-flex;
   align-items: center;
   padding: 5px 10px;
   border-radius: 999px;
-  background: #f4f6fa;
+  background: var(--logo-chip);
   border: 1px solid var(--bdr);
 }
 .mark .by-logo img {
@@ -241,7 +274,40 @@ button {
   border: 1px solid var(--bdr);
   border-radius: 14px;
   overflow: hidden;
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--chat-shadow);
+}
+
+/* ── theme toggle (fixed, top-right) ───────────────────────────────────── */
+.theme-toggle {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 99px;
+  background: var(--s1);
+  border: 1px solid var(--bdr);
+  color: var(--txt2);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.theme-toggle:hover {
+  color: var(--acc);
+  border-color: var(--bdr2);
+  background: var(--s2);
+}
+/* the icon shows the theme you'd switch TO */
+.theme-toggle .i-sun {
+  display: none;
+}
+:root[data-theme="dark"] .theme-toggle .i-sun {
+  display: block;
+}
+:root[data-theme="dark"] .theme-toggle .i-moon {
+  display: none;
 }
 .chat-head {
   display: flex;

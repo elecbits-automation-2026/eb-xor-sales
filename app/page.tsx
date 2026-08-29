@@ -1,10 +1,12 @@
 import Image from "next/image";
 
 import Chat from "@/components/Chat";
+import ThemeToggle from "@/components/ThemeToggle";
 
 export default function Home() {
   return (
     <main className="shell">
+      <ThemeToggle />
       <section className="hero">
         <div className="mark">
           <span className="xor">

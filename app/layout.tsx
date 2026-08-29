@@ -18,12 +18,21 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0c0e13",
+  themeColor: "#f8fafc",
 };
+
+// Applied before first paint so a stored dark choice never flashes light.
+// Light is the default; #dark / #light in the URL override for previews.
+const themeInit = `(function(){var t=null;try{t=localStorage.getItem("xor_theme")}catch(e){}
+if(t!=="dark"&&t!=="light"){t=location.hash==="#dark"?"dark":"light"}
+document.documentElement.dataset.theme=t})()`;
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className={`dark ${plexMono.variable}`}>
+    <html lang="en" data-theme="light" className={plexMono.variable} suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInit }} />
+      </head>
       <body>{children}</body>
     </html>
   );
