@@ -11,17 +11,22 @@
  *   ODM_SLOTS → ODM_REVIEW, or EMS_CHECKLIST → EMS_DETAILS, or
  *   PRODUCT_CATEGORY → PRODUCT_DETAILS → (finalize) → DONE
  */
+import type { AuthUser } from "./auth-server";
 import { cfg, PRODUCT_CATEGORIES, TRACK_LABELS } from "./config";
 import {
   CONTACT_FORM,
   EMS_CHECKLIST,
   EMS_DETAILS_FORM,
+  INDUSTRY_CODES,
+  makeClientCode,
+  makeDealId,
   ODM_SLOTS,
   ODM_SLOT_LABELS,
+  ORG_SIZES,
   PRODUCT_DETAILS_FORM,
 } from "./flows";
 import * as llm from "./llm";
-import { getDb, type SessionRow } from "./supabase";
+import { getDb, type ClientRow, type SessionRow } from "./supabase";
 import { istHuman, istTimestamp } from "./util";
 import type {
   ChatIn,
@@ -111,13 +116,20 @@ async function out(s: SessionRow, messages: string[], widgets: Widget[] = []): P
 }
 
 // ─────────────────────────── entry points ─────────────────────────────────
-export async function handle(inp: ChatIn): Promise<ChatOut> {
+export async function handle(inp: ChatIn, authUser?: AuthUser | null): Promise<ChatOut> {
   const db = getDb();
   let s: SessionRow | null = null;
   if (inp.session_id && UUID_RE.test(inp.session_id)) {
     s = await db.getSession(inp.session_id);
   }
   if (!s) s = await db.createSession();
+
+  // A verified login on the request binds this session (and its lead) to
+  // that client account, so it shows up under "Your projects".
+  if (authUser && s.data.auth_user_id !== authUser.id) {
+    s.data.auth_user_id = authUser.id;
+    s.data.auth_email = authUser.email;
+  }
 
   if (inp.kind === "open") {
     const seen = await db.recentMessages(s.id, 1);
@@ -147,6 +159,10 @@ export async function handle(inp: ChatIn): Promise<ChatOut> {
         return await trackConfirm(s, inp, history);
       case "CONTACT":
         return await contact(s, inp);
+      case "CLIENT_INDUSTRY":
+        return await clientIndustry(s, inp);
+      case "CLIENT_ORGSIZE":
+        return await clientOrgsize(s, inp);
       case "ODM_SLOTS":
         return await odmSlots(s, inp);
       case "ODM_REVIEW":
@@ -308,11 +324,68 @@ async function contact(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
   s.data.contact = v;
   const first = v.name.split(/\s+/)[0];
 
+  // Returning client? Matched by contact email — reused for FILING (client
+  // ID + folder); the account view still requires a verified login.
+  const existing = await getDb().findClientByEmail(v.email);
+  if (existing) {
+    s.data.client_id = existing.id;
+    s.data.client_code = existing.client_code;
+    return startTrackFlow(
+      s,
+      first,
+      `Welcome back — filing this under client ID ${existing.client_code}. `,
+    );
+  }
+
+  s.state = "CLIENT_INDUSTRY";
+  return out(
+    s,
+    [
+      `Thanks ${first}. Two quick company questions so this files under the ` +
+        `right client ID. Which industry fits ${v.company} best?`,
+    ],
+    [industryChips()],
+  );
+}
+
+function industryChips(): Widget {
+  return chips(INDUSTRY_CODES.map((i) => ({ id: `ind:${i.code}`, label: i.label })));
+}
+
+function orgSizeChips(): Widget {
+  return chips(ORG_SIZES.map((o) => ({ id: `org:${o.code}`, label: o.label })));
+}
+
+async function clientIndustry(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
+  if (inp.kind === "chip" && inp.chip_id?.startsWith("ind:")) {
+    const code = inp.chip_id.split(":", 2)[1];
+    if (INDUSTRY_CODES.some((i) => i.code === code)) {
+      s.data.industry_code = code;
+      s.state = "CLIENT_ORGSIZE";
+      return out(s, ["And the organisation size?"], [orgSizeChips()]);
+    }
+  }
+  return resume(s);
+}
+
+async function clientOrgsize(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
+  if (inp.kind === "chip" && inp.chip_id?.startsWith("org:")) {
+    const code = inp.chip_id.split(":", 2)[1];
+    if (ORG_SIZES.some((o) => o.code === code)) {
+      s.data.org_size_code = code;
+      const first = (s.data.contact.name ?? "").split(/\s+/)[0] ?? "";
+      return startTrackFlow(s, first);
+    }
+  }
+  return resume(s);
+}
+
+async function startTrackFlow(s: SessionRow, first: string, prefix = ""): Promise<ChatOut> {
   if (s.track === "ODM") {
     s.state = "ODM_SLOTS";
     const [key, q, hint] = ODM_SLOTS[0];
     s.data.expected_slot = key;
-    let msg = `Thanks ${first}. ${q}`;
+    let msg = `${prefix}Thanks ${first}. ${q}`;
     if (hint) msg += ` (${hint})`;
     return out(s, [msg]);
   }
@@ -338,7 +411,7 @@ async function contact(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
     return out(
       s,
       [
-        `Thanks ${first}. Upload whatever's ready from the list — skip ` +
+        `${prefix}Thanks ${first}. Upload whatever's ready from the list — skip ` +
           "anything you don't have yet and I'll flag it for the team. " +
           "First up: your BoM.",
       ],
@@ -348,7 +421,7 @@ async function contact(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
 
   s.state = "PRODUCT_CATEGORY";
   const opts = PRODUCT_CATEGORIES.map(([cid, label]) => ({ id: `cat:${cid}`, label }));
-  return out(s, [`Thanks ${first}. Which category fits best?`], [chips(opts)]);
+  return out(s, [`${prefix}Thanks ${first}. Which category fits best?`], [chips(opts)]);
 }
 
 async function odmSlots(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
@@ -554,11 +627,61 @@ async function finalize(s: SessionRow): Promise<ChatOut> {
   }
 }
 
+/**
+ * Resolve (or create) the client record behind this session, per the PMS
+ * ClientID system. A verified login binds only when its VERIFIED email
+ * matches the client record — a typed contact email is enough for filing,
+ * never for attaching someone's login to someone else's client.
+ */
+async function resolveClient(s: SessionRow): Promise<ClientRow> {
+  const db = getDb();
+  const d = s.data;
+  const email = (d.contact.email ?? "").trim().toLowerCase();
+
+  let client: ClientRow | null = null;
+  if (d.auth_user_id) client = await db.findClientByAuthUserId(d.auth_user_id);
+  if (!client && email) client = await db.findClientByEmail(email);
+
+  if (client) {
+    if (d.auth_user_id && !client.auth_user_id && d.auth_email && d.auth_email === client.email) {
+      await db.updateClient(client.id, { auth_user_id: d.auth_user_id });
+      client = { ...client, auth_user_id: d.auth_user_id };
+    }
+  } else {
+    const seq = await db.nextSeq("client");
+    // Defaults mirror the PMS codes: UN = Individuals/Unknown, 21 = Other.
+    const code = makeClientCode(d.org_size_code ?? "UN", d.industry_code ?? "21", seq);
+    client = await db.insertClient({
+      client_code: code,
+      company: d.contact.company ?? "",
+      industry_code: d.industry_code,
+      org_size_code: d.org_size_code,
+      contact_name: d.contact.name ?? null,
+      email: email || null,
+      phone: d.contact.phone ?? null,
+      auth_user_id: d.auth_user_id,
+      drive_folder_id: null,
+      drive_folder_url: null,
+    });
+  }
+  d.client_id = client.id;
+  d.client_code = client.client_code;
+  return client;
+}
+
 async function finalizeWork(s: SessionRow): Promise<ChatOut> {
   const db = getDb();
   const d = s.data;
   if (!d.lead_ref) d.lead_ref = await db.nextLeadRef();
   const c = d.contact;
+
+  // Client ID + Deal ID first — the folder hierarchy and every reference
+  // downstream (ULM included) hang off these.
+  const client = await resolveClient(s);
+  if (!d.deal_id) {
+    const n = await db.nextSeq(`deal:${client.client_code}`);
+    d.deal_id = makeDealId(client.client_code, n);
+  }
 
   const { summary, quantity, timeline } = leadSummary(s);
   let leadId = d.lead_id;
@@ -574,6 +697,8 @@ async function finalizeWork(s: SessionRow): Promise<ChatOut> {
       summary,
       quantity,
       timeline,
+      client_id: client.id,
+      deal_id: d.deal_id,
     });
     leadId = lead.id;
     d.lead_id = leadId;
@@ -593,6 +718,9 @@ async function finalizeWork(s: SessionRow): Promise<ChatOut> {
 
   const drivePayload = {
     lead_ref: d.lead_ref,
+    deal_id: d.deal_id,
+    client_code: client.client_code,
+    client_folder_id: client.drive_folder_id,
     company: c.company ?? "",
     files,
     summary_md: summaryMd,
@@ -612,7 +740,13 @@ async function finalizeWork(s: SessionRow): Promise<ChatOut> {
         drive_folder_url: res.folder_url,
         drive_committed: true,
       });
-      console.info(`xor lead=${d.lead_ref} handoff=drive ok`);
+      if (res.client_folder_id && res.client_folder_id !== client.drive_folder_id) {
+        await db.updateClient(client.id, {
+          drive_folder_id: res.client_folder_id,
+          drive_folder_url: res.client_folder_url,
+        });
+      }
+      console.info(`xor lead=${d.lead_ref} deal=${d.deal_id} handoff=drive ok`);
     } catch (err) {
       handoffTrouble = true;
       console.error(`drive handoff failed lead=${d.lead_ref}`, err);
@@ -645,6 +779,7 @@ async function finalizeWork(s: SessionRow): Promise<ChatOut> {
       url: `/api/download/${s.id}/${encodeURIComponent(d.lld_file)}`,
     });
   }
+  links.push({ label: "Track this in your account", url: "/account" });
 
   d.finalized = true;
   const first = (c.name ?? "").split(/\s+/)[0] ?? "";
@@ -656,7 +791,7 @@ async function finalizeWork(s: SessionRow): Promise<ChatOut> {
   const trackLine = trackLines[s.track ?? ""] ?? "the team will take it from here";
   let msg =
     `All set${first ? ", " + first : ""} — your requirement is logged as ` +
-    `${d.lead_ref}. Within one working day ${trackLine}, on ` +
+    `${d.deal_id ?? d.lead_ref}. Within one working day ${trackLine}, on ` +
     `${c.email ?? "your email"}.`;
   if (handoffTrouble) {
     msg += " (Our filing system had a hiccup just now, but your intake is saved and the team has it.)";
@@ -707,7 +842,7 @@ function funnelRow(
   const c = s.data.contact;
   return [
     istTimestamp(),
-    s.data.lead_ref ?? "",
+    s.data.deal_id ?? s.data.lead_ref ?? "",
     c.company ?? "",
     c.name ?? "",
     c.email ?? "",
@@ -727,9 +862,10 @@ function intakeSummary(s: SessionRow): string {
   const d = s.data;
   const c = d.contact;
   const lines = [
-    `# Intake ${d.lead_ref} — ${c.company ?? ""}`,
+    `# Intake ${d.deal_id ?? d.lead_ref} — ${c.company ?? ""}`,
     `*Captured by XOR Assist · ${istHuman()}*`,
     "",
+    `**Client ID:** ${d.client_code ?? "—"} · **Deal ID:** ${d.deal_id ?? "—"} · **Funnel ref:** ${d.lead_ref}`,
     `**Track:** ${TRACK_LABELS[s.track ?? ""] ?? s.track ?? ""}`,
     `**Contact:** ${c.name ?? ""} · ${c.email ?? ""} · ${c.phone ?? ""}`,
     "",
@@ -784,6 +920,10 @@ function resumeWidget(s: SessionRow): Widget | null {
     }
     case "CONTACT":
       return form("contact", "How do we reach you?", CONTACT_FORM, "Save & continue");
+    case "CLIENT_INDUSTRY":
+      return industryChips();
+    case "CLIENT_ORGSIZE":
+      return orgSizeChips();
     case "EMS_CHECKLIST": {
       const cur = currentEmsItem(s);
       return cur ? uploadWidget(cur) : checklistWidget(s);
@@ -808,6 +948,8 @@ async function resume(s: SessionRow): Promise<ChatOut> {
     DISCOVER: "Where were we — what are you building?",
     TRACK_CONFIRM: "Have I got the track right?",
     CONTACT: "Just the contact form and we'll keep moving.",
+    CLIENT_INDUSTRY: "Which industry fits your company best?",
+    CLIENT_ORGSIZE: "And the organisation size?",
     ODM_SLOTS: resumeOdmQuestion(s),
     ODM_REVIEW: "Ready to generate the LLD draft, or change an answer?",
     EMS_CHECKLIST: "Whenever you're ready with the next file.",

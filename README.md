@@ -66,6 +66,27 @@ Tests: `pnpm test` · Types: `pnpm typecheck` · Lint: `pnpm lint`
    (pg_cron) — purges sessions/messages of non-converted visitors after
    90 days; leads persist.
 
+### 1b · Client accounts (Supabase Auth)
+
+Clients can sign up / sign in and see **their enquiries** at `/account`
+(identity = verified login only; typed contact emails never unlock data).
+
+1. Run [`supabase/migrations/0002_clients.sql`](supabase/migrations/0002_clients.sql)
+   (clients table + the PMS-consistent ID counters).
+2. Supabase Dashboard → Authentication → Providers → enable **Email**, and
+   keep **Confirm email ON** — unconfirmed signups must never unlock an
+   enquiry list. Set Site URL (Authentication → URL Configuration) to your
+   domain so confirmation/reset links land on `/account`.
+3. Add `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` to
+   Vercel env (the browser uses them for auth only; RLS stays deny-all).
+
+**ID system (identical to the PMS ODM tool):** clients get
+`<orgSize><industry>-<seq>` codes (e.g. `PL03-001`) from two quick chip
+questions in the intake (returning contact emails skip them and reuse the
+code); each enquiry gets a deal ID `EbZ-<client>-<NN>`. Drive mirrors it:
+`"<client_code> <Company>"/<deal_id>/00-Intake…` — created **before** any
+downstream (ULM) process picks the lead up.
+
 ### 2 · Google Cloud + Drive (½ day, mostly waiting on admin)
 
 1. Create a service account; enable **Drive API + Sheets API**; download the

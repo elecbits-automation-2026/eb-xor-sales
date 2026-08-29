@@ -43,6 +43,8 @@ export interface NewLead {
   summary: string;
   quantity: string;
   timeline: string;
+  client_id: string | null;
+  deal_id: string | null;
 }
 
 export interface LeadRow extends NewLead {
@@ -51,6 +53,21 @@ export interface LeadRow extends NewLead {
   drive_folder_url: string | null;
   drive_committed: boolean;
   sheet_appended: boolean;
+  created_at?: string;
+}
+
+export interface ClientRow {
+  id: string;
+  client_code: string; // PL03-001
+  company: string;
+  industry_code: string | null;
+  org_size_code: string | null;
+  contact_name: string | null;
+  email: string | null; // stored lowercased
+  phone: string | null;
+  auth_user_id: string | null;
+  drive_folder_id: string | null;
+  drive_folder_url: string | null;
 }
 
 export interface LeadFileRow {
@@ -117,6 +134,15 @@ export interface Db {
   insertLead(lead: NewLead): Promise<LeadRow>;
   updateLead(id: string, patch: Partial<Omit<LeadRow, "id">>): Promise<void>;
   getLead(id: string): Promise<LeadRow | null>;
+
+  // Clients (the PMS-consistent ClientID system)
+  findClientByEmail(email: string): Promise<ClientRow | null>;
+  findClientByAuthUserId(authUserId: string): Promise<ClientRow | null>;
+  insertClient(client: Omit<ClientRow, "id">): Promise<ClientRow>;
+  updateClient(id: string, patch: Partial<Omit<ClientRow, "id">>): Promise<void>;
+  leadsForClient(clientId: string): Promise<LeadRow[]>;
+  /** Atomic named sequence (client numbering, per-client deal numbering). */
+  nextSeq(name: string): Promise<number>;
 
   insertLeadFile(file: LeadFileRow): Promise<void>;
   leadFiles(sessionId: string): Promise<LeadFileRow[]>;
@@ -267,6 +293,56 @@ class SupabaseDb implements Db {
     const { data, error } = await this.client.from("leads").select("*").eq("id", id).maybeSingle();
     if (error) throw new Error(`supabase: ${error.message}`);
     return (data as LeadRow) ?? null;
+  }
+
+  async findClientByEmail(email: string): Promise<ClientRow | null> {
+    const { data, error } = await this.client
+      .from("clients")
+      .select("*")
+      .eq("email", email.trim().toLowerCase())
+      .maybeSingle();
+    if (error) throw new Error(`supabase: ${error.message}`);
+    return data ? (data as unknown as ClientRow) : null;
+  }
+
+  async findClientByAuthUserId(authUserId: string): Promise<ClientRow | null> {
+    const { data, error } = await this.client
+      .from("clients")
+      .select("*")
+      .eq("auth_user_id", authUserId)
+      .maybeSingle();
+    if (error) throw new Error(`supabase: ${error.message}`);
+    return data ? (data as unknown as ClientRow) : null;
+  }
+
+  async insertClient(client: Omit<ClientRow, "id">): Promise<ClientRow> {
+    return SupabaseDb.check(
+      await this.client
+        .from("clients")
+        .insert({ ...client, email: client.email?.trim().toLowerCase() ?? null })
+        .select("*")
+        .single(),
+    ) as unknown as ClientRow;
+  }
+
+  async updateClient(id: string, patch: Partial<Omit<ClientRow, "id">>): Promise<void> {
+    SupabaseDb.check(await this.client.from("clients").update(patch).eq("id", id).select("id"));
+  }
+
+  async leadsForClient(clientId: string): Promise<LeadRow[]> {
+    return SupabaseDb.check(
+      await this.client
+        .from("leads")
+        .select("*")
+        .eq("client_id", clientId)
+        .order("created_at", { ascending: false }),
+    ) as unknown as LeadRow[];
+  }
+
+  async nextSeq(name: string): Promise<number> {
+    const { data, error } = await this.client.rpc("next_seq", { p_name: name });
+    if (error) throw new Error(`supabase rpc next_seq: ${error.message}`);
+    return data as number;
   }
 
   async insertLeadFile(file: LeadFileRow): Promise<void> {
@@ -441,6 +517,7 @@ interface MemState {
   sessions: Map<string, SessionRow>;
   messages: Map<string, Msg[]>;
   leads: Map<string, LeadRow>;
+  clients: Map<string, ClientRow>;
   leadFiles: LeadFileRow[];
   retries: HandoffRetryRow[];
   retrySeq: number;
@@ -458,6 +535,7 @@ function memState(): MemState {
       sessions: new Map(),
       messages: new Map(),
       leads: new Map(),
+      clients: new Map(),
       leadFiles: [],
       retries: [],
       retrySeq: 0,
@@ -537,9 +615,55 @@ class MemoryDb implements Db {
       drive_folder_url: null,
       drive_committed: false,
       sheet_appended: false,
+      created_at: new Date().toISOString(),
     };
     this.s.leads.set(row.id, row);
     return structuredClone(row);
+  }
+
+  async findClientByEmail(email: string): Promise<ClientRow | null> {
+    const needle = email.trim().toLowerCase();
+    for (const c of this.s.clients.values()) {
+      if (c.email === needle) return structuredClone(c);
+    }
+    return null;
+  }
+
+  async findClientByAuthUserId(authUserId: string): Promise<ClientRow | null> {
+    for (const c of this.s.clients.values()) {
+      if (c.auth_user_id === authUserId) return structuredClone(c);
+    }
+    return null;
+  }
+
+  async insertClient(client: Omit<ClientRow, "id">): Promise<ClientRow> {
+    const row: ClientRow = {
+      ...client,
+      id: randomUUID(),
+      email: client.email?.trim().toLowerCase() ?? null,
+    };
+    this.s.clients.set(row.id, row);
+    return structuredClone(row);
+  }
+
+  async updateClient(id: string, patch: Partial<Omit<ClientRow, "id">>): Promise<void> {
+    const row = this.s.clients.get(id);
+    if (!row) throw new Error(`memory db: no client ${id}`);
+    Object.assign(row, patch);
+  }
+
+  async leadsForClient(clientId: string): Promise<LeadRow[]> {
+    return structuredClone(
+      [...this.s.leads.values()]
+        .filter((l) => l.client_id === clientId)
+        .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? "")),
+    );
+  }
+
+  async nextSeq(name: string): Promise<number> {
+    const n = (this.s.counters.get(`seq:${name}`) ?? 0) + 1;
+    this.s.counters.set(`seq:${name}`, n);
+    return n;
   }
 
   async updateLead(id: string, patch: Partial<Omit<LeadRow, "id">>): Promise<void> {

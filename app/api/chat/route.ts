@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { getUserFromRequest } from "@/lib/auth-server";
 import * as orchestrator from "@/lib/orchestrator";
 import { clientKey, rateLimitOk } from "@/lib/ratelimit";
 import type { ChatIn } from "@/lib/widgets";
@@ -30,6 +31,9 @@ export async function POST(req: NextRequest) {
     body.text = body.text.slice(0, 4000);
   }
 
-  const res = await orchestrator.handle(body);
+  // Optional verified login — binds the session (and its lead) to the
+  // client account so it appears under "Your projects".
+  const authUser = await getUserFromRequest(req);
+  const res = await orchestrator.handle(body, authUser);
   return NextResponse.json(res);
 }

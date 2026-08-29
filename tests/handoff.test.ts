@@ -63,6 +63,10 @@ async function runProductIntake(): Promise<string> {
       },
     },
   });
+  expect(res.meta.state).toBe("CLIENT_INDUSTRY");
+  res = await chat({ session_id: sid, kind: "chip", chip_id: "ind:03" });
+  expect(res.meta.state).toBe("CLIENT_ORGSIZE");
+  res = await chat({ session_id: sid, kind: "chip", chip_id: "org:PL" });
   expect(res.meta.state).toBe("PRODUCT_CATEGORY");
   res = await chat({ session_id: sid, kind: "chip", chip_id: "cat:iot" });
   res = await chat({
@@ -88,6 +92,8 @@ describe("handoff failure path", () => {
   it("records the retry, completes the visitor UX, and the retry route resolves it", async () => {
     vi.mocked(driveHandoff).mockRejectedValueOnce(new Error("Drive is down"));
     vi.mocked(driveHandoff).mockResolvedValue({
+      client_folder_id: "client-folder-1",
+      client_folder_url: "https://drive.google.com/drive/folders/client-folder-1",
       folder_id: "folder-123",
       folder_url: "https://drive.google.com/drive/folders/folder-123",
       file_ids: {},
