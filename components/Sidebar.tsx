@@ -2,13 +2,14 @@
 
 /**
  * App-shell sidebar, shared by "/" and /account — brand, "+ New enquiry",
- * the PROJECTS list, and the account footer.
+ * the PROJECTS list, and the account footer. Both pages are login-gated, so
+ * the sidebar always renders for a signed-in user.
  *
  * Two modes:
- *  - page="home": self-contained. Resolves auth itself, fetches
- *    /api/me/enquiries once, and renders rows as links to /account?deal=…;
- *    signed-out it shows a quiet sign-in card instead. Hidden on mobile
- *    (the page keeps its own compact header).
+ *  - page="home": fetches /api/me/enquiries once itself and renders rows as
+ *    links to /account?deal=…; a 401 means the token died mid-session, so it
+ *    calls onExpired (the page gate drops to the login view). Hidden on
+ *    mobile (the page keeps its own compact header).
  *  - page="account": fully controlled by AccountPanel (which already owns
  *    the data + selection); rows select in-pane via onSelect.
  */
@@ -17,7 +18,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 
-import { currentUser, getAccessToken, signOut } from "@/lib/client-auth";
+import { getAccessToken } from "@/lib/client-auth";
 
 export interface SidebarEnquiry {
   deal_id: string | null;
@@ -31,7 +32,7 @@ export function enquiryKey(q: SidebarEnquiry): string {
 }
 
 type Props =
-  | { page: "home" }
+  | { page: "home"; email: string; onSignOut: () => void; onExpired: () => void }
   | {
       page: "account";
       email: string;
@@ -43,10 +44,11 @@ type Props =
       onSignOut: () => void;
     };
 
-type HomeState =
-  | { st: "loading" }
-  | { st: "out" }
-  | { st: "in"; email: string; code: string | null; enqs: SidebarEnquiry[] | null };
+interface HomeData {
+  code: string | null;
+  /** null = fetch failed (stay signed in, just say so) */
+  enqs: SidebarEnquiry[] | null;
+}
 
 function startNewEnquiry() {
   try {
@@ -62,22 +64,17 @@ function startNewEnquiry() {
 
 export default function Sidebar(props: Props) {
   const isHome = props.page === "home";
-  const [home, setHome] = useState<HomeState>({ st: "loading" });
+  const onExpired = props.page === "home" ? props.onExpired : null;
+  const [home, setHome] = useState<HomeData | "loading">("loading");
 
   useEffect(() => {
-    if (!isHome) return;
+    if (!isHome || !onExpired) return;
     let alive = true;
     void (async () => {
-      const u = await currentUser();
-      if (!alive) return;
-      if (!u) {
-        setHome({ st: "out" });
-        return;
-      }
       const token = await getAccessToken();
       if (!alive) return;
       if (!token) {
-        setHome({ st: "out" });
+        onExpired();
         return;
       }
       try {
@@ -86,7 +83,7 @@ export default function Sidebar(props: Props) {
         });
         if (!alive) return;
         if (r.status === 401) {
-          setHome({ st: "out" });
+          onExpired();
           return;
         }
         if (!r.ok) throw new Error(`bad status ${r.status}`);
@@ -94,36 +91,23 @@ export default function Sidebar(props: Props) {
           client: { client_code: string | null } | null;
           enquiries: SidebarEnquiry[];
         };
-        setHome({
-          st: "in",
-          email: u.email,
-          code: data.client?.client_code ?? null,
-          enqs: data.enquiries ?? [],
-        });
+        setHome({ code: data.client?.client_code ?? null, enqs: data.enquiries ?? [] });
       } catch {
         // reachable-but-failed: stay signed in, just say the list didn't load
-        if (alive) setHome({ st: "in", email: u.email, code: null, enqs: null });
+        if (alive) setHome({ code: null, enqs: null });
       }
     })();
     return () => {
       alive = false;
     };
-  }, [isHome]);
-
-  const homeSignOut = async () => {
-    try {
-      await signOut();
-    } catch {
-      // local state clears regardless
-    }
-    setHome({ st: "out" });
-  };
+  }, [isHome, onExpired]);
 
   // ── view model ──────────────────────────────────────────────────────────
   let list: ReactNode;
-  let foot: ReactNode = null;
+  let code: string | null;
 
   if (props.page === "account") {
+    code = props.clientCode;
     list =
       props.enquiries === null ? (
         <div className="app-quiet" role="status">
@@ -149,42 +133,15 @@ export default function Sidebar(props: Props) {
           );
         })
       );
-    foot = (
-      <div className="app-foot">
-        {props.clientCode ? <span className="app-code">{props.clientCode}</span> : null}
-        <div className="app-foot-row">
-          <span className="app-foot-mail" title={props.email}>
-            {props.email}
-          </span>
-          <button type="button" className="app-ghost" onClick={props.onSignOut}>
-            Sign out
-          </button>
-        </div>
-      </div>
-    );
-  } else if (home.st === "loading") {
+  } else if (home === "loading") {
+    code = null;
     list = (
       <div className="app-quiet" role="status">
         Loading…
       </div>
     );
-  } else if (home.st === "out") {
-    list = (
-      <div className="app-signin">
-        <p>Sign in to track your enquiries</p>
-        <Link className="app-signin-btn" href="/account">
-          Sign in
-        </Link>
-      </div>
-    );
-    foot = (
-      <div className="app-foot">
-        <Link className="app-ghost app-ghost-wide" href="/account">
-          Sign in / Create account
-        </Link>
-      </div>
-    );
   } else {
+    code = home.code;
     list =
       home.enqs === null ? (
         <div className="app-quiet">Couldn&apos;t load your enquiries.</div>
@@ -205,19 +162,6 @@ export default function Sidebar(props: Props) {
           );
         })
       );
-    foot = (
-      <div className="app-foot">
-        {home.code ? <span className="app-code">{home.code}</span> : null}
-        <div className="app-foot-row">
-          <span className="app-foot-mail" title={home.email}>
-            {home.email}
-          </span>
-          <button type="button" className="app-ghost" onClick={homeSignOut}>
-            Sign out
-          </button>
-        </div>
-      </div>
-    );
   }
 
   return (
@@ -245,7 +189,17 @@ export default function Sidebar(props: Props) {
       <nav className="app-list" aria-label="Projects">
         {list}
       </nav>
-      {foot}
+      <div className="app-foot">
+        {code ? <span className="app-code">{code}</span> : null}
+        <div className="app-foot-row">
+          <span className="app-foot-mail" title={props.email}>
+            {props.email}
+          </span>
+          <button type="button" className="app-ghost" onClick={props.onSignOut}>
+            Sign out
+          </button>
+        </div>
+      </div>
     </aside>
   );
 }

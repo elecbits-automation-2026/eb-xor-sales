@@ -808,14 +808,20 @@ button {
   color: var(--acc);
 }
 
-/* full-page quiet loading splash */
-.acct2-loading {
+/* full-page auth-gate splash — mark + subtle pulse, no view flash */
+@keyframes gatePulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+.gate-loading {
   display: grid;
   place-items: center;
   min-height: 100dvh;
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--txt3);
+}
+.gate-loading img {
+  opacity: 0.85;
+  animation: gatePulse 1.5s ease-in-out infinite;
 }
 
 /* ═══ /account, signed out — split login ═════════════════════════════════ */
