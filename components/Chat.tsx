@@ -135,7 +135,8 @@ export default function Chat() {
     [addMsg, render],
   );
 
-  // Open (or resume) the session on mount.
+  // Open (or resume) the session on mount. ?new=1 forces a fresh session
+  // (used by "+ New enquiry" links) and is stripped from the URL.
   useEffect(() => {
     if (openedRef.current) return;
     openedRef.current = true;
@@ -144,6 +145,26 @@ export default function Chat() {
       stored = sessionStorage.getItem(SESSION_KEY) ?? undefined;
     } catch {
       stored = undefined;
+    }
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("new") === "1") {
+        stored = undefined;
+        try {
+          sessionStorage.removeItem(SESSION_KEY);
+        } catch {
+          // nothing stored to clear
+        }
+        params.delete("new");
+        const qs = params.toString();
+        window.history.replaceState(
+          {},
+          "",
+          window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash,
+        );
+      }
+    } catch {
+      // URL parsing is best-effort — a normal open still happens
     }
     void post({ kind: "open" }, stored);
   }, [post]);

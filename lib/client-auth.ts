@@ -142,7 +142,7 @@ async function mockAuth(
 
 export async function signUp(i: {
   name: string;
-  company: string;
+  company?: string;
   email: string;
   password: string;
 }): Promise<{ needsEmailConfirm: boolean }> {
@@ -150,7 +150,7 @@ export async function signUp(i: {
     const { data, error } = await sb().auth.signUp({
       email: i.email,
       password: i.password,
-      options: { data: { name: i.name, company: i.company } },
+      options: { data: { name: i.name, company: i.company ?? "" } },
     });
     if (error) throw new Error(friendly(error.message));
     // No session back ⇒ Supabase wants the email confirmed first.
@@ -161,10 +161,27 @@ export async function signUp(i: {
     email: i.email,
     password: i.password,
     name: i.name,
-    company: i.company,
+    company: i.company ?? "",
   });
   storeDemo(token, { email: user.email, name: user.name });
   return { needsEmailConfirm: false };
+}
+
+/**
+ * Google OAuth. Supabase mode: kicks off the provider redirect (the page
+ * navigates away — a resolved call means the redirect is underway) and lands
+ * back on /account. Demo mode: not available; throws a friendly notice.
+ */
+export async function signInWithGoogle(): Promise<void> {
+  if (authMode() === "supabase") {
+    const { error } = await sb().auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: window.location.origin + "/account" },
+    });
+    if (error) throw new Error(friendly(error.message));
+    return;
+  }
+  throw new Error("Google sign-in goes live with the production setup — use email below for now.");
 }
 
 export async function signIn(email: string, password: string): Promise<void> {
