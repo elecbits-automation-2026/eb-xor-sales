@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 
 import Chat from "@/components/Chat";
 import ThemeToggle from "@/components/ThemeToggle";
@@ -25,6 +26,9 @@ export default function Home() {
           <span className="by-logo">
             <Image src="/elecbits-logo.png" alt="Elecbits" width={118} height={22} priority />
           </span>
+          <Link className="acct-link" href="/account">
+            My projects →
+          </Link>
         </div>
         <h1>
           From brief to board.
