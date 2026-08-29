@@ -276,7 +276,7 @@ export default function Chat() {
     <div className="chat">
       <div className="chat-head">
         <div className="avatar" aria-hidden="true">
-          Xo
+          Eb
         </div>
         <div>
           <div className="t">XOR Assist</div>
@@ -290,9 +290,18 @@ export default function Chat() {
       <div className="log" ref={logRef} role="log" aria-live="polite">
         {entries.map((e) =>
           e.kind === "msg" ? (
-            <div key={e.id} className={`msg ${e.who}`}>
-              {e.text}
-            </div>
+            e.who === "bot" ? (
+              <div key={e.id} className="brow">
+                <span className="eb-av" aria-hidden="true">
+                  Eb
+                </span>
+                <div className="msg bot">{e.text}</div>
+              </div>
+            ) : (
+              <div key={e.id} className={`msg ${e.who}`}>
+                {e.text}
+              </div>
+            )
           ) : (
             <div key={e.id} className={`wzone${e.frozen ? " frozen" : ""}`} inert={e.frozen}>
               {e.widgets.map((w, i) => (
@@ -302,10 +311,15 @@ export default function Chat() {
           ),
         )}
         {awaiting && (
-          <div className="msg bot typing" aria-label="XOR Assist is typing">
-            <i />
-            <i />
-            <i />
+          <div className="brow" aria-label="XOR Assist is typing">
+            <span className="eb-av" aria-hidden="true">
+              Eb
+            </span>
+            <div className="msg bot typing">
+              <i />
+              <i />
+              <i />
+            </div>
           </div>
         )}
       </div>

@@ -1,7 +1,15 @@
 import type { Metadata, Viewport } from "next";
+import { IBM_Plex_Mono } from "next/font/google";
 import type { ReactNode } from "react";
 
 import "./globals.css";
+
+const plexMono = IBM_Plex_Mono({
+  subsets: ["latin"],
+  weight: ["400", "600", "700"],
+  variable: "--font-mono",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "XoR — from brief to board · Elecbits",
@@ -10,12 +18,12 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0a0c10",
+  themeColor: "#0c0e13",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" className={`dark ${plexMono.variable}`}>
       <body>{children}</body>
     </html>
   );

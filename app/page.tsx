@@ -27,7 +27,7 @@ export default function Home() {
         </p>
         <div className="tracks">
           <div className="track">
-            <span className="dot" style={{ background: "var(--accent)" }} />
+            <span className="dot" style={{ background: "var(--acc)" }} />
             <div>
               <div className="t-top">
                 <b>Design a new product</b>
@@ -37,7 +37,7 @@ export default function Home() {
             </div>
           </div>
           <div className="track">
-            <span className="dot" style={{ background: "var(--secondary)" }} />
+            <span className="dot" style={{ background: "var(--purple)" }} />
             <div>
               <div className="t-top">
                 <b>I have a design — manufacture it</b>
@@ -47,7 +47,7 @@ export default function Home() {
             </div>
           </div>
           <div className="track">
-            <span className="dot" style={{ background: "var(--amber)" }} />
+            <span className="dot" style={{ background: "var(--coral)" }} />
             <div>
               <div className="t-top">
                 <b>Ready products</b>
