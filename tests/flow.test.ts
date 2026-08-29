@@ -66,12 +66,12 @@ async function throughContact(
     kind: "form",
     form: { form_id: "contact", values: contact },
   });
-  // New clients answer two company questions (industry + org size — the
-  // PMS ClientID codes); returning clients skip straight to the track.
+  // New clients answer two company questions (sector + org size — register
+  // columns per the ID SOP); returning clients skip straight to the track.
   if (cur.meta.state === "CLIENT_INDUSTRY") {
-    cur = await chat({ session_id: sid, kind: "chip", chip_id: "ind:03" });
+    cur = await chat({ session_id: sid, kind: "chip", chip_id: "sec:4" });
     expect(cur.meta.state).toBe("CLIENT_ORGSIZE");
-    cur = await chat({ session_id: sid, kind: "chip", chip_id: "org:PL" });
+    cur = await chat({ session_id: sid, kind: "chip", chip_id: "org:0" });
   }
   return cur;
 }

@@ -93,11 +93,11 @@ export interface SessionData {
   product: Record<string, string>;
   lead_ref: string | null; // XOR-YYYYMMDD-NNN (internal funnel key)
   lead_id: string | null; // leads.id uuid
-  deal_id: string | null; // EbZ-<client_code>-NN — the client-facing ref
+  deal_id: string | null; // EB-D-YY-nnnn-ss — the client-facing ref
   client_id: string | null; // xor.clients.id once resolved
-  client_code: string | null; // PL03-001 — reused for returning clients
-  industry_code: string | null; // "01".."42" (new clients)
-  org_size_code: string | null; // PL/ML/EL/EM/UN/GO (new clients)
+  client_code: string | null; // EB-C-YY-nnnn — reused for returning clients
+  sector: string | null; // register Lists sector (new clients)
+  org_size: string | null; // register Lists org size (new clients)
   auth_user_id: string | null; // verified login attached to this session
   auth_email: string | null; // verified email of that login
   lld_file: string | null; // filename served for download
@@ -122,8 +122,8 @@ export function blankSessionData(): SessionData {
     deal_id: null,
     client_id: null,
     client_code: null,
-    industry_code: null,
-    org_size_code: null,
+    sector: null,
+    org_size: null,
     auth_user_id: null,
     auth_email: null,
     lld_file: null,

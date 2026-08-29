@@ -20,11 +20,11 @@ test("visitor picks a track and submits contact details", async ({ page }) => {
   await page.getByLabel("Phone / WhatsApp").fill("+91 9876501234");
   await page.getByRole("button", { name: "Save & continue" }).click();
 
-  // New client → the two company questions (industry + org size).
-  await expect(page.getByText("Which industry fits", { exact: false })).toBeVisible();
-  await page.getByRole("button", { name: "Just IoT", exact: true }).click();
+  // New client → the two company questions (sector + org size).
+  await expect(page.getByText("Which sector fits", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "IoT & Connected Devices", exact: true }).click();
   await expect(page.getByText("organisation size", { exact: false })).toBeVisible();
-  await page.getByRole("button", { name: /Proto Level/ }).click();
+  await page.getByRole("button", { name: /Proto-Level Startup/ }).click();
 
   // The bot acknowledges and asks the first ODM question.
   await expect(page.getByText("Thanks Asha", { exact: false })).toBeVisible();

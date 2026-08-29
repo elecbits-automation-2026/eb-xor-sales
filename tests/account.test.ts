@@ -2,7 +2,8 @@
  * Client accounts (demo-mode auth) + the ClientID/DealID system:
  *  - signup → signin → chat with a bearer token → finalize → the enquiry
  *    appears under /api/me/enquiries for THAT login only
- *  - PMS-consistent IDs: client PL03-001-style, deals EbZ-<client>-NN
+ *  - SOP-compliant IDs (Eb-SOP v1.2): clients EB-C-YY-nnnn, deals
+ *    EB-D-YY-nnnn-ss (client block verbatim + per-client sequence)
  *  - returning clients (same contact email) skip the company questions and
  *    reuse the client code; deal sequence increments
  */
@@ -71,9 +72,9 @@ async function runProductIntake(
   );
   if (expectNewClient) {
     expect(res.meta.state).toBe("CLIENT_INDUSTRY");
-    res = await chat({ session_id: sid, kind: "chip", chip_id: "ind:03" }, token);
+    res = await chat({ session_id: sid, kind: "chip", chip_id: "sec:4" }, token);
     expect(res.meta.state).toBe("CLIENT_ORGSIZE");
-    res = await chat({ session_id: sid, kind: "chip", chip_id: "org:PL" }, token);
+    res = await chat({ session_id: sid, kind: "chip", chip_id: "org:0" }, token);
   } else {
     // returning client — company questions skipped, client code reused
     expect(res.meta.state).toBe("PRODUCT_CATEGORY");
@@ -103,18 +104,19 @@ beforeEach(() => {
 });
 
 describe("client IDs and deal IDs", () => {
-  it("issues PMS-consistent codes and nests deals under the client", async () => {
+  it("issues SOP-compliant identifiers and nests deals under the client", async () => {
     const sid = await runProductIntake("meera@bolt.in");
     const db = getDb();
     const s = await db.getSession(sid);
-    expect(s?.data.client_code).toMatch(/^PL03-\d{3}$/);
-    expect(s?.data.deal_id).toBe(`EbZ-${s?.data.client_code}-01`);
+    expect(s?.data.client_code).toMatch(/^EB-C-\d{2}-\d{4}$/);
+    const dealBlock = s!.data.client_code!.replace(/^EB-C-/, "EB-D-");
+    expect(s?.data.deal_id).toBe(`${dealBlock}-01`);
 
     // second enquiry, same contact email → same client, next deal number
     const sid2 = await runProductIntake("meera@bolt.in", undefined, false);
     const s2 = await db.getSession(sid2);
     expect(s2?.data.client_code).toBe(s?.data.client_code);
-    expect(s2?.data.deal_id).toBe(`EbZ-${s?.data.client_code}-02`);
+    expect(s2?.data.deal_id).toBe(`${dealBlock}-02`);
 
     // the drive handoff payload carries the client/deal hierarchy
     const retries = (
@@ -139,9 +141,9 @@ describe("account view", () => {
     );
     expect(mine.status).toBe(200);
     const body = await mine.json();
-    expect(body.client.client_code).toMatch(/^PL03-\d{3}$/);
+    expect(body.client.client_code).toMatch(/^EB-C-\d{2}-\d{4}$/);
     expect(body.enquiries.length).toBe(1);
-    expect(body.enquiries[0].deal_id).toMatch(/^EbZ-PL03-\d{3}-01$/);
+    expect(body.enquiries[0].deal_id).toMatch(/^EB-D-\d{2}-\d{4}-01$/);
     expect(body.enquiries[0].track).toBe("PRODUCT");
 
     // a different login sees nothing of it

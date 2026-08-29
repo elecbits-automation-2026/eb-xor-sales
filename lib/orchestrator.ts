@@ -17,13 +17,11 @@ import {
   CONTACT_FORM,
   EMS_CHECKLIST,
   EMS_DETAILS_FORM,
-  INDUSTRY_CODES,
-  makeClientCode,
-  makeDealId,
   ODM_SLOTS,
   ODM_SLOT_LABELS,
   ORG_SIZES,
   PRODUCT_DETAILS_FORM,
+  SECTORS,
 } from "./flows";
 import * as llm from "./llm";
 import { getDb, type ClientRow, type SessionRow } from "./supabase";
@@ -341,26 +339,26 @@ async function contact(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
   return out(
     s,
     [
-      `Thanks ${first}. Two quick company questions so this files under the ` +
-        `right client ID. Which industry fits ${v.company} best?`,
+      `Thanks ${first}. Two quick company questions for our records. ` +
+        `Which sector fits ${v.company} best?`,
     ],
     [industryChips()],
   );
 }
 
 function industryChips(): Widget {
-  return chips(INDUSTRY_CODES.map((i) => ({ id: `ind:${i.code}`, label: i.label })));
+  return chips(SECTORS.map((label, i) => ({ id: `sec:${i}`, label })));
 }
 
 function orgSizeChips(): Widget {
-  return chips(ORG_SIZES.map((o) => ({ id: `org:${o.code}`, label: o.label })));
+  return chips(ORG_SIZES.map((label, i) => ({ id: `org:${i}`, label })));
 }
 
 async function clientIndustry(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
-  if (inp.kind === "chip" && inp.chip_id?.startsWith("ind:")) {
-    const code = inp.chip_id.split(":", 2)[1];
-    if (INDUSTRY_CODES.some((i) => i.code === code)) {
-      s.data.industry_code = code;
+  if (inp.kind === "chip" && inp.chip_id?.startsWith("sec:")) {
+    const i = Number(inp.chip_id.split(":", 2)[1]);
+    if (Number.isInteger(i) && i >= 0 && i < SECTORS.length) {
+      s.data.sector = SECTORS[i];
       s.state = "CLIENT_ORGSIZE";
       return out(s, ["And the organisation size?"], [orgSizeChips()]);
     }
@@ -370,9 +368,9 @@ async function clientIndustry(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
 
 async function clientOrgsize(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
   if (inp.kind === "chip" && inp.chip_id?.startsWith("org:")) {
-    const code = inp.chip_id.split(":", 2)[1];
-    if (ORG_SIZES.some((o) => o.code === code)) {
-      s.data.org_size_code = code;
+    const i = Number(inp.chip_id.split(":", 2)[1]);
+    if (Number.isInteger(i) && i >= 0 && i < ORG_SIZES.length) {
+      s.data.org_size = ORG_SIZES[i];
       const first = (s.data.contact.name ?? "").split(/\s+/)[0] ?? "";
       return startTrackFlow(s, first);
     }
@@ -628,10 +626,11 @@ async function finalize(s: SessionRow): Promise<ChatOut> {
 }
 
 /**
- * Resolve (or create) the client record behind this session, per the PMS
- * ClientID system. A verified login binds only when its VERIFIED email
- * matches the client record — a typed contact email is enough for filing,
- * never for attaching someone's login to someone else's client.
+ * Resolve (or create) the client behind this session. A NEW client is
+ * issued by the Eb-Master Register FIRST (SOP Law 6) — this table only
+ * caches the issued identity. A verified login binds only when its VERIFIED
+ * email matches the client record — a typed contact email is enough for
+ * filing, never for attaching someone's login to someone else's client.
  */
 async function resolveClient(s: SessionRow): Promise<ClientRow> {
   const db = getDb();
@@ -648,14 +647,18 @@ async function resolveClient(s: SessionRow): Promise<ClientRow> {
       client = { ...client, auth_user_id: d.auth_user_id };
     }
   } else {
-    const seq = await db.nextSeq("client");
-    // Defaults mirror the PMS codes: UN = Individuals/Unknown, 21 = Other.
-    const code = makeClientCode(d.org_size_code ?? "UN", d.industry_code ?? "21", seq);
+    const { register } = await import("./register");
+    const code = await register().issueClient({
+      company: d.contact.company ?? "",
+      sector: d.sector ?? "Individuals & Other",
+      orgSize: d.org_size ?? "Individual / Unknown (UN)",
+      contactName: d.contact.name ?? "",
+    });
     client = await db.insertClient({
       client_code: code,
       company: d.contact.company ?? "",
-      industry_code: d.industry_code,
-      org_size_code: d.org_size_code,
+      sector: d.sector,
+      org_size: d.org_size,
       contact_name: d.contact.name ?? null,
       email: email || null,
       phone: d.contact.phone ?? null,
@@ -674,16 +677,17 @@ async function finalizeWork(s: SessionRow): Promise<ChatOut> {
   const d = s.data;
   if (!d.lead_ref) d.lead_ref = await db.nextLeadRef();
   const c = d.contact;
+  const { summary, quantity, timeline } = leadSummary(s);
 
-  // Client ID + Deal ID first — the folder hierarchy and every reference
-  // downstream (ULM included) hang off these.
+  // Register rows FIRST (SOP Law 6: no register row, no folder): the client
+  // on the Clients tab, then the deal on the Deals tab (Status=Open). The
+  // folder hierarchy and every downstream reference (ULM included) hang off
+  // these identifiers.
   const client = await resolveClient(s);
   if (!d.deal_id) {
-    const n = await db.nextSeq(`deal:${client.client_code}`);
-    d.deal_id = makeDealId(client.client_code, n);
+    const { register } = await import("./register");
+    d.deal_id = await register().issueDeal(client.client_code, summary.slice(0, 80));
   }
-
-  const { summary, quantity, timeline } = leadSummary(s);
   let leadId = d.lead_id;
   if (!leadId) {
     const lead = await db.insertLead({
@@ -745,6 +749,13 @@ async function finalizeWork(s: SessionRow): Promise<ChatOut> {
           drive_folder_id: res.client_folder_id,
           drive_folder_url: res.client_folder_url,
         });
+      }
+      // Register step 7: write the Drive Folder Link back onto the Deals tab.
+      try {
+        const { register } = await import("./register");
+        await register().setDealFolderLink(d.deal_id!, res.folder_url);
+      } catch (err) {
+        console.error(`register folder-link write failed deal=${d.deal_id}`, err);
       }
       console.info(`xor lead=${d.lead_ref} deal=${d.deal_id} handoff=drive ok`);
     } catch (err) {

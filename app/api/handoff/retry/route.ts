@@ -51,12 +51,21 @@ export async function POST(req: NextRequest) {
     processed++;
     try {
       if (r.kind === "drive") {
-        const result = await driveHandoff(r.payload as unknown as DriveHandoffPayload);
+        const payload = r.payload as unknown as DriveHandoffPayload;
+        const result = await driveHandoff(payload);
         await db.updateLead(r.lead_id, {
           drive_folder_id: result.folder_id,
           drive_folder_url: result.folder_url,
           drive_committed: true,
         });
+        if (payload.deal_id) {
+          try {
+            const { register } = await import("@/lib/register");
+            await register().setDealFolderLink(payload.deal_id, result.folder_url);
+          } catch (e2) {
+            console.error(`register folder-link write failed deal=${payload.deal_id}`, e2);
+          }
+        }
       } else {
         const row = (r.payload as { row?: (string | number)[] }).row ?? [];
         // The Drive Folder cell (index 11) may have been empty at finalize

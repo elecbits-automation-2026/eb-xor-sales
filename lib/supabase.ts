@@ -58,10 +58,10 @@ export interface LeadRow extends NewLead {
 
 export interface ClientRow {
   id: string;
-  client_code: string; // PL03-001
+  client_code: string; // EB-C-YY-nnnn (issued by the Eb-Master Register)
   company: string;
-  industry_code: string | null;
-  org_size_code: string | null;
+  sector: string | null;
+  org_size: string | null;
   contact_name: string | null;
   email: string | null; // stored lowercased
   phone: string | null;

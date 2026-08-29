@@ -190,18 +190,24 @@ export async function driveHandoff(p: DriveHandoffPayload): Promise<DriveResult>
 
   let clientFolderId: string | null = null;
   let rootId: string;
+  let intakeId: string;
   if (p.client_code) {
-    clientFolderId =
-      p.client_folder_id ?? (await ensureFolder(`${p.client_code} ${p.company}`.trim(), parent));
+    // SOP layout (Law 5: folder = the ID alone): client folder EB-C-YY-nnnn
+    // in the Sales container, deal folder EB-D-…-ss inside it — a LIGHT
+    // folder with no blueprint tree; the full project tree belongs to the
+    // project ULM opens at sanction, never to the deal.
+    clientFolderId = p.client_folder_id ?? (await ensureFolder(p.client_code, parent));
     rootId = await ensureFolder(p.deal_id ?? p.lead_ref, clientFolderId);
+    intakeId = rootId;
   } else {
+    // Legacy layout for handoff payloads queued before the SOP alignment.
     rootId = await ensureFolder(`${p.lead_ref} ${p.company}`.trim(), parent);
+    const subfolders: Record<string, string> = {};
+    for (const sub of ACCOUNT_SUBFOLDERS) {
+      subfolders[sub] = await ensureFolder(sub, rootId);
+    }
+    intakeId = subfolders["00-Intake"];
   }
-  const subfolders: Record<string, string> = {};
-  for (const sub of ACCOUNT_SUBFOLDERS) {
-    subfolders[sub] = await ensureFolder(sub, rootId);
-  }
-  const intakeId = subfolders["00-Intake"];
   const already = await listChildNames(intakeId);
 
   const db = getDb();

@@ -1,19 +1,23 @@
--- Client accounts + the ClientID/DealID system (mirrors the PMS ODM tool).
+-- Client accounts + the bot's cache of register-issued identities.
 --
---   Client ID: <ORG_SIZE_CODE><INDUSTRY_CODE>-<SEQ3>   e.g. PL03-001
---   Deal ID:   EbZ-<client_code>-<NN>                  e.g. EbZ-PL03-001-01
+-- IDs follow Eb-SOP_Project-Creation-and-ID-Creation_v1.2: meaning-free
+-- EB-FAMILY-YY-nnnn, ISSUED BY the Eb-Master Register (Law 6: register row
+-- first, folder second). This table is the XOR tool's private working
+-- record — email ↔ client identity — never an ID authority. Sector and org
+-- size are descriptive register columns, not ID components.
 --
--- Drive mirrors this: "<client_code> <Company>"/<deal_id>/00-Intake…
--- created BEFORE any downstream (ULM) process picks the lead up.
+--   Client: EB-C-26-0001 · folder EB-C-26-0001 in Eb-07-Sales
+--   Deal:   EB-D-26-0001-01 · light folder inside the client folder,
+--           created BEFORE ULM takes any action.
 
 set search_path = xor, extensions, public;
 
 create table if not exists xor.clients (
   id uuid primary key default gen_random_uuid(),
-  client_code text unique not null,           -- PL03-001
+  client_code text unique not null,           -- EB-C-YY-nnnn
   company text not null,
-  industry_code text,                          -- "01".."42"
-  org_size_code text,                          -- PL/ML/EL/EM/UN/GO
+  sector text,                                 -- register Lists sector
+  org_size text,                               -- register Lists org size
   contact_name text,
   email text unique,                           -- stored lowercased
   phone text,

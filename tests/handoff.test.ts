@@ -64,9 +64,9 @@ async function runProductIntake(): Promise<string> {
     },
   });
   expect(res.meta.state).toBe("CLIENT_INDUSTRY");
-  res = await chat({ session_id: sid, kind: "chip", chip_id: "ind:03" });
+  res = await chat({ session_id: sid, kind: "chip", chip_id: "sec:4" });
   expect(res.meta.state).toBe("CLIENT_ORGSIZE");
-  res = await chat({ session_id: sid, kind: "chip", chip_id: "org:PL" });
+  res = await chat({ session_id: sid, kind: "chip", chip_id: "org:0" });
   expect(res.meta.state).toBe("PRODUCT_CATEGORY");
   res = await chat({ session_id: sid, kind: "chip", chip_id: "cat:iot" });
   res = await chat({

@@ -168,43 +168,50 @@ export function checkExtension(
 }
 
 /**
- * Client-ID codes — VERBATIM from the PMS ODM tool so IDs are 100%
- * consistent across systems: Client ID = <orgSize><industry>-<seq3>
- * (e.g. PL03-001), Deal ID = EbZ-<clientId>-<NN>.
+ * Client profiling — VERBATIM from the Eb-Master Register v1.2 Lists tab
+ * (Eb-SOP_Project-Creation-and-ID-Creation_v1.2). Sector and org size are
+ * register COLUMNS, never part of an identifier: IDs are meaning-free
+ * (EB-FAMILY-YY-nnnn), issued register-first per the SOP's nine laws.
  */
-export const INDUSTRY_CODES: { label: string; code: string }[] = [
-  ["Electric Vehicle", "01"], ["EMS", "02"], ["Just IoT", "03"], ["IIoT", "04"],
-  ["Home Automation", "05"], ["Medical & Healthcare", "06"],
-  ["Energy Meter & Metering", "07"], ["Wearables", "08"],
-  ["Camera & Opticals", "09"], ["Agri/Farm/Food Tech", "10"], ["AR/VR/AI", "11"],
-  ["EdTech", "12"], ["Industrial/Machine Setup", "13"], ["ERP Solutions", "14"],
-  ["Robotics", "15"], ["Information Technology", "16"], ["Defence/Military", "17"],
-  ["Automotive", "18"], ["Battery Manufacturer", "19"],
-  ["Consumer Electronics", "20"], ["Other", "21"], ["Government & Alliance", "22"],
-  ["Freelance/Individual", "23"], ["Logistics/Fleet", "24"], ["Fintech", "25"],
-  ["Aerospace", "26"], ["BLDC", "27"], ["Renewables", "28"], ["Oil & Gas", "29"],
-  ["Smart Home", "30"], ["Research", "31"], ["E-Mobility", "32"],
-  ["Infrastructure", "33"], ["Toys and Games", "34"], ["Incubator", "35"],
-  ["Security/Surveillance", "36"], ["Components Mfg", "37"], ["Drone Tech", "38"],
-  ["Solar", "39"], ["IT Hardware", "40"], ["Display Manufacturers", "41"],
-  ["Industrial Applications", "42"],
-].map(([label, code]) => ({ label, code }));
-
-export const ORG_SIZES: { label: string; code: string }[] = [
-  { label: "Proto Level — Small Hardware Startups", code: "PL" },
-  { label: "Mid Level — Hardware Startups", code: "ML" },
-  { label: "Enterprise — Large Product Companies", code: "EL" },
-  { label: "EMS", code: "EM" },
-  { label: "Individuals / Unknown", code: "UN" },
-  { label: "Government Organisation", code: "GO" },
+export const SECTORS: string[] = [
+  "Mobility & EV",
+  "Energy & Power",
+  "Industrial & Automation",
+  "Electronics Manufacturing",
+  "IoT & Connected Devices",
+  "Consumer Electronics",
+  "Medical & Healthcare",
+  "Agri & Food Tech",
+  "Defence & Aerospace",
+  "Robotics & Drones",
+  "IT, Software & AI",
+  "Logistics & Infrastructure",
+  "Security & Surveillance",
+  "Government, Research & Institutions",
+  "Individuals & Other",
 ];
 
-export function makeClientCode(orgSizeCode: string, industryCode: string, seq: number): string {
-  return `${orgSizeCode}${industryCode}-${String(seq).padStart(3, "0")}`;
+export const ORG_SIZES: string[] = [
+  "Proto-Level Startup (PL)",
+  "Mid-Level Startup (ML)",
+  "Enterprise (EL)",
+  "EMS (EM)",
+  "Government (GO)",
+  "Individual / Unknown (UN)",
+];
+
+/** EB-C-26-0001 style. Serial is 4-digit, per family, restarting each January. */
+export function formatEbId(family: "C" | "D" | "P", yy: string, serial: number): string {
+  return `EB-${family}-${yy}-${String(serial).padStart(4, "0")}`;
 }
 
-export function makeDealId(clientCode: string, seq: number): string {
-  return `EbZ-${clientCode}-${String(seq).padStart(2, "0")}`;
+/**
+ * The one identifier that embeds a reference (SOP §2.3): the client block is
+ * lifted verbatim, with a per-client 2-digit deal sequence.
+ * EB-C-26-0001 + 5 → EB-D-26-0001-05.
+ */
+export function dealIdFor(clientId: string, seq: number): string {
+  return `${clientId.replace(/^EB-C-/, "EB-D-")}-${String(seq).padStart(2, "0")}`;
 }
 
 export const CONTACT_FORM: FormField[] = [

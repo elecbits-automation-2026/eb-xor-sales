@@ -80,12 +80,19 @@ Clients can sign up / sign in and see **their enquiries** at `/account`
 3. Add `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` to
    Vercel env (the browser uses them for auth only; RLS stays deny-all).
 
-**ID system (identical to the PMS ODM tool):** clients get
-`<orgSize><industry>-<seq>` codes (e.g. `PL03-001`) from two quick chip
-questions in the intake (returning contact emails skip them and reuse the
-code); each enquiry gets a deal ID `EbZ-<client>-<NN>`. Drive mirrors it:
-`"<client_code> <Company>"/<deal_id>/00-Intake…` — created **before** any
-downstream (ULM) process picks the lead up.
+**ID system (per Eb-SOP_Project-Creation-and-ID-Creation v1.2):**
+identifiers are meaning-free — clients `EB-C-YY-nnnn`, deals
+`EB-D-YY-nnnn-ss` (client block verbatim + per-client sequence). Sector and
+org size are captured as register *columns* via two chip questions
+(returning contact emails skip them and reuse the client ID). Issuance is
+**register-first** (Law 6): the bot writes the Clients/Deals rows on the
+Eb-Master Register (`MASTER_REGISTER_SPREADSHEET_ID`, shared with the
+service account as Editor) before creating anything in Drive, then the deal
+folder — a **light** folder `EB-D-…` inside the client folder `EB-C-…` in
+Eb-07-Sales (folder = the ID alone, no blueprint tree) — and writes the
+Drive Folder Link back onto the Deals tab. Deals start as Status=Open;
+**the bot never creates projects** — a WON deal with a confirmed PO is
+converted by the PM/ULM per the setup SOP.
 
 ### 2 · Google Cloud + Drive (½ day, mostly waiting on admin)
 
