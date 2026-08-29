@@ -654,10 +654,10 @@ button {
   text-align: center;
 }
 
-/* ── client account + app shell (appended) ─────────────────────────────────
-   Everything below is additive: the /account experience (Claude-style login
-   + projects shell), the shared sidebar, and the "/" app-shell layout.
-   Tokens and the chat styles above are untouched. */
+/* ── client account + app shell ────────────────────────────────────────────
+   Everything below serves the gated pages: the /account experience
+   (Claude-style login + projects shell), the shared sidebar, and the "/"
+   app-shell layout around the chat pane styled above. */
 
 /* full-page auth-gate splash — mark + subtle pulse, no view flash */
 @keyframes gatePulse {
@@ -1414,130 +1414,48 @@ button {
   filter: brightness(1.1);
 }
 
-/* ═══ "/" — app shell around the chat ════════════════════════════════════ */
+/* ═══ "/" — app shell around the chat ════════════════════════════════════
+   The main pane IS the chat: no inner header block, no card. All the pane
+   chrome (top bar, column, composer) lives in the .chat styles above. */
 .home {
   display: flex;
   height: 100dvh;
   overflow: hidden;
 }
 .home-main {
+  display: flex;
   flex: 1;
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-  padding: 22px 32px 12px;
   background: var(--bg);
-}
-.home-head {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  width: 100%;
-  max-width: 860px;
-  margin: 0 auto 16px;
-}
-.home-brand {
-  display: none;
-  align-items: center;
-  gap: 8px;
-  color: inherit;
-  text-decoration: none;
-}
-.home-wordmark {
-  font-size: 19px;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-}
-.home-wordmark b {
-  color: var(--acc);
-}
-.home-head-text {
-  min-width: 0;
-}
-.home-head-text h1 {
-  margin: 0;
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: -0.015em;
-}
-.home-head-text p {
-  margin: 3px 0 0;
-  font-size: 13px;
-  color: var(--txt2);
-}
-.home-acct {
-  display: none;
-}
-.home-logo {
-  display: inline-flex;
-  align-items: center;
-  flex: 0 0 auto;
-  margin-left: auto;
-  padding: 6px 12px;
-  background: var(--logo-chip);
-  border: 1px solid var(--bdr);
-  border-radius: 99px;
-}
-.home-logo img {
-  display: block;
-}
-.home-chat {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  width: 100%;
-  max-width: 860px;
-  margin: 0 auto;
-}
-.home-chat .chat {
-  flex: 1;
-  height: auto;
-  min-height: 0;
-}
-.home-trust {
-  width: 100%;
-  max-width: 860px;
-  margin: 9px auto 2px;
-  font-size: 11.5px;
-  color: var(--txt3);
-  text-align: center;
 }
 
 /* ═══ mobile ═════════════════════════════════════════════════════════════ */
 @media (max-width: 960px) {
-  /* "/" — sidebar hidden; compact brand header; chat fills the viewport */
+  /* "/" — sidebar hidden; the chat pane fills the viewport (top bar stays,
+     margins tighten, the /account link appears in the top bar) */
   .side-home {
     display: none;
   }
-  .home-main {
-    padding: 0;
+  .chat-top-inner {
+    padding-left: 16px;
   }
-  .home-head {
-    max-width: none;
-    margin: 0;
-    /* right inset clears the fixed theme toggle */
-    padding: 12px 56px 12px 16px;
-    border-bottom: 1px solid var(--bdr);
-  }
-  .home-brand {
-    display: flex;
-  }
-  .home-head-text,
-  .home-logo,
-  .home-trust {
-    display: none;
-  }
-  .home-acct {
+  .chat-top-acct {
     display: inline;
   }
-  .home-chat {
-    max-width: none;
+  .log {
+    padding-bottom: 132px;
   }
-  .home-chat .chat {
-    border: 0;
-    border-radius: 0;
-    box-shadow: none;
+  .log-col {
+    padding: 0 16px;
+  }
+  .composer {
+    padding: 24px 0 10px;
+  }
+  .composer-col {
+    padding: 0 10px;
+  }
+  .foot {
+    margin-top: 6px;
   }
 
   /* login — single column, panel hidden */
