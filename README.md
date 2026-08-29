@@ -76,9 +76,31 @@ Tests: `pnpm test` · Types: `pnpm typecheck` · Lint: `pnpm lint`
    service account creates count against its own 15 GB quota and are owned
    by it). Recommended: `Eb-07-Sales/01-Accounts` on a Shared Drive, service
    account as Content Manager. This is the #1 production gotcha.
-3. Share with the SA's `client_email`: the `01-Accounts` parent
-   (Editor/Content Manager), the funnel spreadsheet (Editor), the templates
-   folder (Viewer), and every KB source folder (Viewer).
+3. Grant Drive access — pick ONE of these two modes:
+
+   **A. Per-folder sharing (least privilege).** Share with the SA's
+   `client_email`: the `01-Accounts` parent (Editor/Content Manager), the
+   funnel spreadsheet (Editor), the templates folder (Viewer), and every
+   KB source folder (Viewer). The bot can touch only what you shared.
+
+   **B. Full-Drive access (Workspace domain-wide delegation).** The bot
+   impersonates a real user and can reach EVERY folder that user can —
+   nothing needs to be shared, and files it creates are owned by that
+   user (which also sidesteps the service account's 15 GB quota):
+   1. In Cloud console → IAM → Service Accounts → your SA → copy its
+      numeric **Unique ID** (OAuth2 client ID).
+   2. In [admin.google.com](https://admin.google.com) → Security →
+      Access and data control → API controls → **Domain-wide
+      delegation** → Add new → paste the client ID, scopes:
+      `https://www.googleapis.com/auth/drive,https://www.googleapis.com/auth/spreadsheets`
+   3. Set env `GOOGLE_IMPERSONATED_USER=<user>@elecbits.in` (use a
+      dedicated ops account if possible, e.g. the account that owns the
+      sales Drive tree).
+
+   ⚠ Mode B means a leaked service-account key = full read/write over
+   that user's entire Drive. Keep the key only in Vercel (Sensitive),
+   rotate it if it ever leaks, and prefer a dedicated user over a
+   personal one.
 4. Create the `XOR Intake` tab on the funnel sheet; grab the spreadsheet ID
    from its URL (`/spreadsheets/d/<ID>/edit`). The bot writes the header row
    if the tab is empty.
