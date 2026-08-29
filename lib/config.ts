@@ -55,6 +55,16 @@ export const cfg = {
   get googleServiceAccountB64() {
     return process.env.GOOGLE_SERVICE_ACCOUNT_B64 || "";
   },
+  /**
+   * Optional Workspace user to impersonate via domain-wide delegation.
+   * When set, the bot acts AS this user and can reach every folder that
+   * user can (full-Drive access, no per-folder sharing); files it creates
+   * are owned by this user, not the service account. Requires DWD to be
+   * granted to the service account in the Google Admin console.
+   */
+  get googleImpersonatedUser() {
+    return process.env.GOOGLE_IMPERSONATED_USER || "";
+  },
   get accountsParentFolderId() {
     return process.env.ACCOUNTS_PARENT_FOLDER_ID || "";
   },

@@ -46,7 +46,15 @@ function buildAuth() {
       "GOOGLE_SERVICE_ACCOUNT_B64 is not valid base64-encoded service-account JSON",
     );
   }
-  return new google.auth.GoogleAuth({ credentials, scopes: SCOPES });
+  // With GOOGLE_IMPERSONATED_USER set (Workspace domain-wide delegation),
+  // every Drive/Sheets call runs AS that user — full access to whatever the
+  // user can see, and created files belong to them, not the service account.
+  const subject = cfg.googleImpersonatedUser;
+  return new google.auth.GoogleAuth({
+    credentials,
+    scopes: SCOPES,
+    ...(subject ? { clientOptions: { subject } } : {}),
+  });
 }
 
 let googleAuth: ReturnType<typeof buildAuth> | null = null;
@@ -267,10 +275,14 @@ export interface KbSourceFile {
 /**
  * Recursively walk every KB source folder (subfolders included) and return
  * all non-folder files; sourceFolder is the top-level folder each came from.
+ * The sentinel "root" (or "*") walks the ENTIRE My Drive of the acting
+ * account — meaningful with GOOGLE_IMPERSONATED_USER; curate before using
+ * it, since indexed content grounds a customer-facing bot.
  */
 export async function listKbFiles(): Promise<KbSourceFile[]> {
   const out: KbSourceFile[] = [];
-  for (const topId of cfg.kbSourceFolderIds) {
+  for (const rawId of cfg.kbSourceFolderIds) {
+    const topId = rawId === "*" ? "root" : rawId;
     const queue = [topId];
     while (queue.length) {
       const folderId = queue.shift()!;
