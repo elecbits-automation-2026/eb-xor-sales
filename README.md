@@ -79,6 +79,11 @@ Clients can sign up / sign in and see **their enquiries** at `/account`
    domain so confirmation/reset links land on `/account`.
 3. Add `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` to
    Vercel env (the browser uses them for auth only; RLS stays deny-all).
+4. **Google sign-in:** Supabase Dashboard → Authentication → Providers →
+   **Google** — paste a Google OAuth client ID/secret from
+   console.cloud.google.com → Credentials, with the authorized redirect URI
+   set to the Supabase callback URL shown on that provider page. In demo
+   mode the button appears with a friendly "use email for now" notice.
 
 **ID system (per Eb-SOP_Project-Creation-and-ID-Creation v1.2):**
 identifiers are meaning-free — clients `EB-C-YY-nnnn`, deals
