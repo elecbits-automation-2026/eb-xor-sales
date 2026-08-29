@@ -132,3 +132,7 @@ export async function POST(req: NextRequest) {
     removed: removedIds.length,
   });
 }
+
+// Vercel Cron invokes with GET (Authorization: Bearer CRON_SECRET is
+// injected automatically when the env var exists); manual runs use POST.
+export { POST as GET };

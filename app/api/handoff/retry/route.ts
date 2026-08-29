@@ -78,3 +78,7 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ ok: true, processed, resolved, failed, skipped });
 }
+
+// Vercel Cron invokes with GET (Authorization: Bearer CRON_SECRET is
+// injected automatically when the env var exists); manual runs use POST.
+export { POST as GET };

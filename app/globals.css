@@ -88,6 +88,22 @@ body {
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
+/* The Elecbits wordmark is black+blue on transparency — it needs a light
+   chip to stay legible on the dark theme. */
+.mark .by-logo {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: #f4f6fa;
+  border: 1px solid var(--line);
+}
+.mark .by-logo img {
+  display: block;
+  height: 22px;
+  width: auto;
+}
 .hero h1 {
   margin: 0 0 16px;
   font-size: clamp(28px, 3.6vw, 44px);

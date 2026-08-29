@@ -1,3 +1,5 @@
+import Image from "next/image";
+
 import Chat from "@/components/Chat";
 
 export default function Home() {
@@ -8,7 +10,10 @@ export default function Home() {
           <span className="xor">
             X<b>o</b>R
           </span>
-          <span className="by">by Elecbits</span>
+          <span className="by">by</span>
+          <span className="by-logo">
+            <Image src="/elecbits-logo.png" alt="Elecbits" width={118} height={22} priority />
+          </span>
         </div>
         <h1>
           From brief to board.
