@@ -77,6 +77,15 @@ export const cfg = {
   get templatesFolderId() {
     return process.env.TEMPLATES_FOLDER_ID || "";
   },
+  /**
+   * The Eb-Master Register Google Sheet (lives in Eb-Central-ULM). The
+   * register is the ISSUING AUTHORITY for every identifier (SOP Law 6: no
+   * register row, no folder) — the bot writes Clients/Deals rows there
+   * before creating anything in Drive.
+   */
+  get masterRegisterSpreadsheetId() {
+    return process.env.MASTER_REGISTER_SPREADSHEET_ID || "";
+  },
 
   // Knowledge base
   get kbSourceFolderIds(): string[] {

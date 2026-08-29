@@ -53,15 +53,27 @@ async function start(text: string): Promise<{ sid: string; res: ChatOut }> {
   return { sid, res };
 }
 
-async function throughContact(sid: string, res: ChatOut): Promise<ChatOut> {
+async function throughContact(
+  sid: string,
+  res: ChatOut,
+  contact: Record<string, string> = CONTACT,
+): Promise<ChatOut> {
   expect(res.meta.state).toBe("TRACK_CONFIRM");
   const confirmed = await chat({ session_id: sid, kind: "chip", chip_id: "confirm:yes" });
   expect(confirmed.meta.state).toBe("CONTACT");
-  return chat({
+  let cur = await chat({
     session_id: sid,
     kind: "form",
-    form: { form_id: "contact", values: CONTACT },
+    form: { form_id: "contact", values: contact },
   });
+  // New clients answer two company questions (sector + org size — register
+  // columns per the ID SOP); returning clients skip straight to the track.
+  if (cur.meta.state === "CLIENT_INDUSTRY") {
+    cur = await chat({ session_id: sid, kind: "chip", chip_id: "sec:4" });
+    expect(cur.meta.state).toBe("CLIENT_ORGSIZE");
+    cur = await chat({ session_id: sid, kind: "chip", chip_id: "org:0" });
+  }
+  return cur;
 }
 
 async function uploadFile(

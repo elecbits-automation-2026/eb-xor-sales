@@ -151,6 +151,12 @@ export interface HandoffFileRef {
 
 export interface DriveHandoffPayload {
   lead_ref: string;
+  /** EbZ-<client_code>-NN — names the deal folder. */
+  deal_id?: string | null;
+  /** PL03-001 — names the client folder ("<client_code> <Company>"). */
+  client_code?: string | null;
+  /** Known client folder id (reused; skips the find-or-create lookup). */
+  client_folder_id?: string | null;
   company: string;
   files: HandoffFileRef[];
   summary_md: string;
@@ -158,26 +164,50 @@ export interface DriveHandoffPayload {
 }
 
 export interface DriveResult {
+  client_folder_id: string | null;
+  client_folder_url: string | null;
+  /** The DEAL folder — where this enquiry's artifacts live. */
   folder_id: string;
   folder_url: string;
   file_ids: Record<string, string>;
 }
 
 /**
- * Create the account folder tree and place every intake artifact in
- * 00-Intake/. A missing storage object is logged and skipped — one lost file
- * must not sink the whole handoff.
+ * Create the client → deal folder hierarchy and place every intake artifact
+ * in the deal's 00-Intake/:
+ *
+ *   <accounts parent>/"<client_code> <Company>"/<deal_id>/00-Intake…
+ *
+ * This structure exists BEFORE any downstream (ULM) process picks the lead
+ * up. Legacy payloads without client_code fall back to the old flat
+ * "<lead_ref> <Company>" layout so queued retries keep working. A missing
+ * storage object is logged and skipped — one lost file must not sink the
+ * whole handoff.
  */
 export async function driveHandoff(p: DriveHandoffPayload): Promise<DriveResult> {
   const parent = cfg.accountsParentFolderId;
   if (!parent) throw new Error("ACCOUNTS_PARENT_FOLDER_ID is not set");
 
-  const rootId = await ensureFolder(`${p.lead_ref} ${p.company}`.trim(), parent);
-  const subfolders: Record<string, string> = {};
-  for (const sub of ACCOUNT_SUBFOLDERS) {
-    subfolders[sub] = await ensureFolder(sub, rootId);
+  let clientFolderId: string | null = null;
+  let rootId: string;
+  let intakeId: string;
+  if (p.client_code) {
+    // SOP layout (Law 5: folder = the ID alone): client folder EB-C-YY-nnnn
+    // in the Sales container, deal folder EB-D-…-ss inside it — a LIGHT
+    // folder with no blueprint tree; the full project tree belongs to the
+    // project ULM opens at sanction, never to the deal.
+    clientFolderId = p.client_folder_id ?? (await ensureFolder(p.client_code, parent));
+    rootId = await ensureFolder(p.deal_id ?? p.lead_ref, clientFolderId);
+    intakeId = rootId;
+  } else {
+    // Legacy layout for handoff payloads queued before the SOP alignment.
+    rootId = await ensureFolder(`${p.lead_ref} ${p.company}`.trim(), parent);
+    const subfolders: Record<string, string> = {};
+    for (const sub of ACCOUNT_SUBFOLDERS) {
+      subfolders[sub] = await ensureFolder(sub, rootId);
+    }
+    intakeId = subfolders["00-Intake"];
   }
-  const intakeId = subfolders["00-Intake"];
   const already = await listChildNames(intakeId);
 
   const db = getDb();
@@ -226,6 +256,10 @@ export async function driveHandoff(p: DriveHandoffPayload): Promise<DriveResult>
   }
 
   return {
+    client_folder_id: clientFolderId,
+    client_folder_url: clientFolderId
+      ? `https://drive.google.com/drive/folders/${clientFolderId}`
+      : null,
     folder_id: rootId,
     folder_url: `https://drive.google.com/drive/folders/${rootId}`,
     file_ids: fileIds,

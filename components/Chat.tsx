@@ -22,6 +22,7 @@ import {
   type KeyboardEvent,
 } from "react";
 
+import { getAccessToken } from "@/lib/client-auth";
 import type { ChatIn, ChatOut, ChecklistItemDef, SessionState, Widget } from "@/lib/widgets";
 import { WidgetView } from "./widgets";
 
@@ -31,6 +32,8 @@ const STATE_LABELS: Record<SessionState, string> = {
   DISCOVER: "understanding your need",
   TRACK_CONFIRM: "confirming track",
   CONTACT: "contact details",
+  CLIENT_INDUSTRY: "about your company",
+  CLIENT_ORGSIZE: "about your company",
   ODM_SLOTS: "requirement capture",
   ODM_REVIEW: "review",
   EMS_CHECKLIST: "build package",
@@ -109,9 +112,13 @@ export default function Chat() {
           session_id: sessionOverride ?? sessionRef.current ?? undefined,
           ...payload,
         };
+        const token = await getAccessToken();
         const r = await fetch("/api/chat", {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: {
+            "content-type": "application/json",
+            ...(token ? { authorization: `Bearer ${token}` } : {}),
+          },
           body: JSON.stringify(body),
         });
         if (!r.ok) throw new Error(`bad status ${r.status}`);
@@ -193,10 +200,12 @@ export default function Chat() {
       busyRef.current = true;
       setBusy(true);
       try {
+        const token = await getAccessToken();
+        const auth: Record<string, string> = token ? { authorization: `Bearer ${token}` } : {};
         // 1. reserve a signed upload slot
         const init = await fetch("/api/upload-url", {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: { "content-type": "application/json", ...auth },
           body: JSON.stringify({
             session_id: sessionRef.current,
             item_key: item.key,
@@ -233,7 +242,7 @@ export default function Chat() {
         // 3. tell the orchestrator; it answers with the next turn
         const done = await fetch("/api/upload-complete", {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: { "content-type": "application/json", ...auth },
           body: JSON.stringify({
             session_id: sessionRef.current,
             item_key: item.key,

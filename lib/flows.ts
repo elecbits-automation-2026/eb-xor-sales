@@ -167,6 +167,53 @@ export function checkExtension(
   return null;
 }
 
+/**
+ * Client profiling — VERBATIM from the Eb-Master Register v1.2 Lists tab
+ * (Eb-SOP_Project-Creation-and-ID-Creation_v1.2). Sector and org size are
+ * register COLUMNS, never part of an identifier: IDs are meaning-free
+ * (EB-FAMILY-YY-nnnn), issued register-first per the SOP's nine laws.
+ */
+export const SECTORS: string[] = [
+  "Mobility & EV",
+  "Energy & Power",
+  "Industrial & Automation",
+  "Electronics Manufacturing",
+  "IoT & Connected Devices",
+  "Consumer Electronics",
+  "Medical & Healthcare",
+  "Agri & Food Tech",
+  "Defence & Aerospace",
+  "Robotics & Drones",
+  "IT, Software & AI",
+  "Logistics & Infrastructure",
+  "Security & Surveillance",
+  "Government, Research & Institutions",
+  "Individuals & Other",
+];
+
+export const ORG_SIZES: string[] = [
+  "Proto-Level Startup (PL)",
+  "Mid-Level Startup (ML)",
+  "Enterprise (EL)",
+  "EMS (EM)",
+  "Government (GO)",
+  "Individual / Unknown (UN)",
+];
+
+/** EB-C-26-0001 style. Serial is 4-digit, per family, restarting each January. */
+export function formatEbId(family: "C" | "D" | "P", yy: string, serial: number): string {
+  return `EB-${family}-${yy}-${String(serial).padStart(4, "0")}`;
+}
+
+/**
+ * The one identifier that embeds a reference (SOP §2.3): the client block is
+ * lifted verbatim, with a per-client 2-digit deal sequence.
+ * EB-C-26-0001 + 5 → EB-D-26-0001-05.
+ */
+export function dealIdFor(clientId: string, seq: number): string {
+  return `${clientId.replace(/^EB-C-/, "EB-D-")}-${String(seq).padStart(2, "0")}`;
+}
+
 export const CONTACT_FORM: FormField[] = [
   { key: "name", label: "Your name", input: "text", required: true, placeholder: "" },
   { key: "company", label: "Company", input: "text", required: true, placeholder: "" },

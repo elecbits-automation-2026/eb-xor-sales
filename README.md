@@ -66,6 +66,34 @@ Tests: `pnpm test` · Types: `pnpm typecheck` · Lint: `pnpm lint`
    (pg_cron) — purges sessions/messages of non-converted visitors after
    90 days; leads persist.
 
+### 1b · Client accounts (Supabase Auth)
+
+Clients can sign up / sign in and see **their enquiries** at `/account`
+(identity = verified login only; typed contact emails never unlock data).
+
+1. Run [`supabase/migrations/0002_clients.sql`](supabase/migrations/0002_clients.sql)
+   (clients table + the PMS-consistent ID counters).
+2. Supabase Dashboard → Authentication → Providers → enable **Email**, and
+   keep **Confirm email ON** — unconfirmed signups must never unlock an
+   enquiry list. Set Site URL (Authentication → URL Configuration) to your
+   domain so confirmation/reset links land on `/account`.
+3. Add `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` to
+   Vercel env (the browser uses them for auth only; RLS stays deny-all).
+
+**ID system (per Eb-SOP_Project-Creation-and-ID-Creation v1.2):**
+identifiers are meaning-free — clients `EB-C-YY-nnnn`, deals
+`EB-D-YY-nnnn-ss` (client block verbatim + per-client sequence). Sector and
+org size are captured as register *columns* via two chip questions
+(returning contact emails skip them and reuse the client ID). Issuance is
+**register-first** (Law 6): the bot writes the Clients/Deals rows on the
+Eb-Master Register (`MASTER_REGISTER_SPREADSHEET_ID`, shared with the
+service account as Editor) before creating anything in Drive, then the deal
+folder — a **light** folder `EB-D-…` inside the client folder `EB-C-…` in
+Eb-07-Sales (folder = the ID alone, no blueprint tree) — and writes the
+Drive Folder Link back onto the Deals tab. Deals start as Status=Open;
+**the bot never creates projects** — a WON deal with a confirmed PO is
+converted by the PM/ULM per the setup SOP.
+
 ### 2 · Google Cloud + Drive (½ day, mostly waiting on admin)
 
 1. Create a service account; enable **Drive API + Sheets API**; download the

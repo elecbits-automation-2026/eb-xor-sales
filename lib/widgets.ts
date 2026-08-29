@@ -10,6 +10,8 @@ export type SessionState =
   | "DISCOVER"
   | "TRACK_CONFIRM"
   | "CONTACT"
+  | "CLIENT_INDUSTRY"
+  | "CLIENT_ORGSIZE"
   | "ODM_SLOTS"
   | "ODM_REVIEW"
   | "EMS_CHECKLIST"
@@ -89,8 +91,15 @@ export interface SessionData {
   checklist: Record<string, { status: "uploaded" | "skipped"; filename?: string }>;
   ems_details: Record<string, string>;
   product: Record<string, string>;
-  lead_ref: string | null; // XOR-YYYYMMDD-NNN
+  lead_ref: string | null; // XOR-YYYYMMDD-NNN (internal funnel key)
   lead_id: string | null; // leads.id uuid
+  deal_id: string | null; // EB-D-YY-nnnn-ss — the client-facing ref
+  client_id: string | null; // xor.clients.id once resolved
+  client_code: string | null; // EB-C-YY-nnnn — reused for returning clients
+  sector: string | null; // register Lists sector (new clients)
+  org_size: string | null; // register Lists org size (new clients)
+  auth_user_id: string | null; // verified login attached to this session
+  auth_email: string | null; // verified email of that login
   lld_file: string | null; // filename served for download
   lld_path: string | null; // storage path of the generated LLD
   drive: { folder_id?: string; folder_url?: string };
@@ -110,6 +119,13 @@ export function blankSessionData(): SessionData {
     product: {},
     lead_ref: null,
     lead_id: null,
+    deal_id: null,
+    client_id: null,
+    client_code: null,
+    sector: null,
+    org_size: null,
+    auth_user_id: null,
+    auth_email: null,
     lld_file: null,
     lld_path: null,
     drive: {},
