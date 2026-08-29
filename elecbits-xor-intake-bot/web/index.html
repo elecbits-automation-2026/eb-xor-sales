@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>XoR by Elecbits — start your build</title>
+<style>
+:root{
+  --bg:#0a0c10; --panel:#12151c; --panel-2:#171b24; --line:#232a37;
+  --ink:#e8eaf0; --ink-2:#9aa3b2; --ink-3:#5f6774;
+  --accent:#2fd6a3; --accent-ink:#06251b; --blue:#58a6ff;
+  --user:#1b2a3a; --radius:14px;
+  --font:15px/1.55 "Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:var(--font);
+  background-image:radial-gradient(1200px 600px at 85% -10%,rgba(47,214,163,.07),transparent 60%),
+                   radial-gradient(900px 500px at -10% 110%,rgba(88,166,255,.06),transparent 60%);}
+.shell{display:grid;grid-template-columns:minmax(0,1fr) minmax(360px,560px);
+  gap:36px;max-width:1200px;margin:0 auto;padding:40px 28px;min-height:100%}
+@media (max-width:920px){.shell{grid-template-columns:1fr;padding:18px 12px;gap:16px}}
+
+/* ── hero ── */
+.hero{align-self:center;padding:12px 4px}
+.mark{display:flex;align-items:baseline;gap:10px;margin-bottom:22px}
+.mark .xor{font-size:34px;font-weight:800;letter-spacing:-.02em}
+.mark .xor b{color:var(--accent)}
+.mark .by{color:var(--ink-3);font-size:13px;letter-spacing:.14em;text-transform:uppercase}
+h1{font-size:clamp(26px,3.6vw,42px);line-height:1.12;letter-spacing:-.02em;margin:0 0 14px;font-weight:750}
+h1 .dim{color:var(--ink-2)}
+.lede{color:var(--ink-2);max-width:46ch;margin:0 0 26px}
+.tracks{display:flex;flex-direction:column;gap:10px;max-width:430px}
+.track{display:flex;gap:12px;align-items:flex-start;background:rgba(255,255,255,.02);
+  border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.track .dot{width:9px;height:9px;border-radius:50%;margin-top:6px;flex:0 0 auto}
+.track b{font-size:14px}
+.track p{margin:2px 0 0;font-size:13px;color:var(--ink-2)}
+.trust{margin-top:26px;font-size:12.5px;color:var(--ink-3)}
+@media (max-width:920px){
+  .hero{padding:6px 6px 0}.lede{margin-bottom:14px}
+  .tracks,.trust{display:none}
+}
+
+/* ── chat panel ── */
+.chat{display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);
+  border-radius:18px;overflow:hidden;height:calc(100vh - 80px);min-height:540px;max-height:860px;
+  box-shadow:0 24px 60px rgba(0,0,0,.45)}
+@media (max-width:920px){.chat{height:calc(100dvh - 120px)}}
+.chat-head{display:flex;align-items:center;gap:10px;padding:13px 16px;border-bottom:1px solid var(--line);
+  background:var(--panel-2)}
+.avatar{width:32px;height:32px;border-radius:9px;background:linear-gradient(135deg,var(--accent),var(--blue));
+  display:grid;place-items:center;color:#04120c;font-weight:800;font-size:13px}
+.chat-head .t{font-weight:650;font-size:14px}
+.chat-head .s{font-size:12px;color:var(--ink-3)}
+.status{margin-left:auto;font-size:11.5px;color:var(--accent);border:1px solid rgba(47,214,163,.35);
+  padding:3px 9px;border-radius:20px;white-space:nowrap}
+.log{flex:1;overflow-y:auto;padding:18px 16px 8px;scroll-behavior:smooth}
+.msg{max-width:86%;margin:0 0 10px;padding:10px 14px;border-radius:var(--radius);white-space:pre-wrap;word-wrap:break-word}
+.msg.bot{background:var(--panel-2);border:1px solid var(--line);border-bottom-left-radius:5px}
+.msg.user{background:var(--user);border:1px solid #27405c;margin-left:auto;border-bottom-right-radius:5px}
+.msg.sys{background:none;border:1px dashed var(--line);color:var(--ink-3);font-size:13px}
+.typing{display:inline-flex;gap:5px;padding:13px 16px}
+.typing i{width:7px;height:7px;border-radius:50%;background:var(--ink-3);animation:b 1.2s infinite}
+.typing i:nth-child(2){animation-delay:.15s}.typing i:nth-child(3){animation-delay:.3s}
+@keyframes b{0%,60%,100%{opacity:.25;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)}}
+
+/* widgets */
+.wzone{margin:2px 0 14px;display:flex;flex-direction:column;gap:10px}
+.frozen{opacity:.45;pointer-events:none}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{font:inherit;font-size:13.5px;padding:8px 14px;border-radius:22px;cursor:pointer;
+  background:rgba(47,214,163,.08);border:1px solid rgba(47,214,163,.4);color:var(--ink)}
+.chip:hover{background:rgba(47,214,163,.16)}
+.chip.picked{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:650}
+.wform{background:var(--panel-2);border:1px solid var(--line);border-radius:var(--radius);padding:14px}
+.wform h4{margin:0 0 10px;font-size:13.5px;color:var(--ink-2);font-weight:600}
+.field{margin-bottom:10px}
+.field label{display:block;font-size:12px;color:var(--ink-3);margin-bottom:4px}
+.field input,.field textarea{width:100%;font:inherit;font-size:14px;color:var(--ink);
+  background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:9px 11px;outline:none}
+.field input:focus,.field textarea:focus{border-color:var(--accent)}
+.field textarea{min-height:64px;resize:vertical}
+.btn{font:inherit;font-size:14px;font-weight:650;padding:10px 16px;border-radius:10px;border:0;
+  cursor:pointer;background:var(--accent);color:var(--accent-ink)}
+.btn:hover{filter:brightness(1.08)}
+.btn.ghost{background:none;border:1px solid var(--line);color:var(--ink-2);font-weight:500}
+.drop{border:1.5px dashed rgba(47,214,163,.5);border-radius:var(--radius);padding:18px 16px;
+  text-align:center;cursor:pointer;background:rgba(47,214,163,.04)}
+.drop.over{background:rgba(47,214,163,.12)}
+.drop b{font-size:14px}
+.drop .hint{font-size:12px;color:var(--ink-3);margin-top:4px}
+.drop .skip{margin-top:10px}
+.drop .skip button{font:inherit;font-size:12.5px;color:var(--ink-3);background:none;border:none;
+  text-decoration:underline;cursor:pointer}
+.busy{color:var(--accent);font-size:13px}
+.check{background:var(--panel-2);border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px}
+.check h4{margin:0 0 8px;font-size:13px;color:var(--ink-2)}
+.check .row{display:flex;gap:9px;align-items:center;font-size:13.5px;padding:3.5px 0}
+.check .st{width:18px;text-align:center}
+.st.up{color:var(--accent)} .st.sk{color:var(--ink-3)} .st.pd{color:var(--ink-3)}
+.check .req{font-size:10.5px;color:var(--blue);border:1px solid rgba(88,166,255,.4);
+  border-radius:4px;padding:0 5px;margin-left:auto}
+.card{background:linear-gradient(180deg,rgba(47,214,163,.06),transparent),var(--panel-2);
+  border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px}
+.card h4{margin:0 0 6px;font-size:14px}
+.card .body{font-size:13.5px;color:var(--ink-2);white-space:pre-wrap}
+.card .links{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.card .links a{font-size:13px;color:var(--accent);border:1px solid rgba(47,214,163,.4);
+  padding:6px 12px;border-radius:9px;text-decoration:none}
+.card .links a:hover{background:rgba(47,214,163,.1)}
+
+/* composer */
+.composer{display:flex;gap:9px;padding:12px;border-top:1px solid var(--line);background:var(--panel-2)}
+.composer textarea{flex:1;font:inherit;font-size:14px;color:var(--ink);background:var(--bg);
+  border:1px solid var(--line);border-radius:12px;padding:10px 13px;resize:none;height:44px;
+  max-height:120px;outline:none}
+.composer textarea:focus{border-color:var(--accent)}
+.send{width:44px;height:44px;border-radius:12px;border:0;background:var(--accent);color:var(--accent-ink);
+  font-size:17px;cursor:pointer;flex:0 0 auto}
+.send:disabled{opacity:.4;cursor:default}
+.foot{font-size:11px;color:var(--ink-3);text-align:center;padding:0 12px 10px;background:var(--panel-2)}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <section class="hero">
+    <div class="mark"><span class="xor">X<b>o</b>R</span><span class="by">by Elecbits</span></div>
+    <h1>From brief to board.<br><span class="dim">Start here.</span></h1>
+    <p class="lede">Tell XOR Assist what you're building. It routes you to the right
+      Elecbits team — design, manufacturing, or a ready product — and captures
+      everything they need, so your first call is a working session, not a
+      questionnaire.</p>
+    <div class="tracks">
+      <div class="track"><span class="dot" style="background:var(--accent)"></span>
+        <div><b>ODM — design a new product</b><p>Brief → architecture → LLD draft, generated as you chat.</p></div></div>
+      <div class="track"><span class="dot" style="background:var(--blue)"></span>
+        <div><b>EMS — manufacture your design</b><p>Upload BoM, Gerbers &amp; build files; get a complete RFQ in one pass.</p></div></div>
+      <div class="track"><span class="dot" style="background:#e8b34b"></span>
+        <div><b>Ready products</b><p>IoT, IT hardware, power electronics — off-the-shelf or white-label.</p></div></div>
+    </div>
+    <p class="trust">R&amp;D + rapid prototyping + SMT manufacturing, one roof · BIS-certified power range</p>
+  </section>
+
+  <section class="chat" aria-label="XOR Assist chat">
+    <div class="chat-head">
+      <div class="avatar">Xo</div>
+      <div><div class="t">XOR Assist</div><div class="s">Elecbits intake</div></div>
+      <div class="status" id="status">online</div>
+    </div>
+    <div class="log" id="log"></div>
+    <div class="composer">
+      <textarea id="input" rows="1" placeholder="Describe what you're building…" aria-label="Message"></textarea>
+      <button class="send" id="send" aria-label="Send">➤</button>
+    </div>
+    <div class="foot">Your details go straight to the Elecbits sales engineering team — no spam.</div>
+  </section>
+</div>
+
+<script>
+const API = "";                       // same origin; set full URL if embedding cross-origin
+let sessionId = null;
+let busy = false;
+
+const log = document.getElementById("log");
+const input = document.getElementById("input");
+const sendBtn = document.getElementById("send");
+const statusEl = document.getElementById("status");
+
+const STATE_LABELS = {
+  DISCOVER:"understanding your need", TRACK_CONFIRM:"confirming track",
+  CONTACT:"contact details", ODM_SLOTS:"requirement capture", ODM_REVIEW:"review",
+  EMS_CHECKLIST:"build package", EMS_DETAILS:"build details",
+  PRODUCT_CATEGORY:"product enquiry", PRODUCT_DETAILS:"product enquiry", DONE:"logged ✓",
+};
+
+/* ── rendering ─────────────────────────────────────────────── */
+function el(tag, cls, text){ const e=document.createElement(tag); if(cls)e.className=cls; if(text!=null)e.textContent=text; return e; }
+function scroll(){ log.scrollTop = log.scrollHeight; }
+
+function addMsg(text, who){ log.appendChild(el("div","msg "+who,text)); scroll(); }
+
+let typingEl=null;
+function typing(on){
+  if(on && !typingEl){ typingEl=el("div","msg bot typing"); typingEl.append(el("i"),el("i"),el("i")); log.appendChild(typingEl); scroll(); }
+  if(!on && typingEl){ typingEl.remove(); typingEl=null; }
+}
+
+function freezeWidgets(){ log.querySelectorAll(".wzone:not(.frozen)").forEach(z=>z.classList.add("frozen")); }
+
+function render(res){
+  typing(false);
+  sessionId = res.session_id;
+  (res.messages||[]).forEach(m=>addMsg(m,"bot"));
+  if(res.widgets && res.widgets.length){
+    const zone = el("div","wzone");
+    res.widgets.forEach(w=>{ const n=widget(w); if(n) zone.appendChild(n); });
+    log.appendChild(zone); scroll();
+  }
+  const meta=res.meta||{};
+  let st = STATE_LABELS[meta.state] || "online";
+  if(meta.progress) st += ` · ${meta.progress.done}/${meta.progress.total} ${meta.progress.label}`;
+  statusEl.textContent = st;
+}
+
+function widget(w){
+  if(w.type==="chips")     return chipsW(w);
+  if(w.type==="form")      return formW(w);
+  if(w.type==="upload")    return uploadW(w);
+  if(w.type==="checklist") return checklistW(w);
+  if(w.type==="card")      return cardW(w);
+  return null;
+}
+
+function chipsW(w){
+  const box=el("div","chips");
+  (w.options||[]).forEach(o=>{
+    const b=el("button","chip",o.label);
+    b.onclick=()=>{ if(busy)return; b.classList.add("picked"); freezeWidgets(); post({kind:"chip",chip_id:o.id}); };
+    box.appendChild(b);
+  });
+  return box;
+}
+
+function formW(w){
+  const f=el("div","wform"); f.appendChild(el("h4",null,w.title||""));
+  const inputs={};
+  (w.fields||[]).forEach(fd=>{
+    const wrap=el("div","field");
+    wrap.appendChild(el("label",null,fd.label+(fd.required?" *":"")));
+    const inp=document.createElement(fd.input==="textarea"?"textarea":"input");
+    if(fd.input!=="textarea") inp.type=fd.input||"text";
+    inp.placeholder=fd.placeholder||"";
+    wrap.appendChild(inp); f.appendChild(wrap); inputs[fd.key]=inp;
+  });
+  const b=el("button","btn",w.submit_label||"Continue");
+  b.onclick=()=>{
+    if(busy)return;
+    const values={}; for(const k in inputs) values[k]=inputs[k].value;
+    freezeWidgets();
+    addMsg(Object.values(values).filter(Boolean).join(" · ")||"(submitted)","user");
+    post({kind:"form",form:{form_id:w.form_id,values}});
+  };
+  f.appendChild(b);
+  return f;
+}
+
+function uploadW(w){
+  const item=w.item||{};
+  const d=el("div","drop");
+  d.appendChild(el("b",null,"Upload: "+(item.label||"file")));
+  d.appendChild(el("div","hint",(item.accept && item.accept!=="*")?("Accepted: "+item.accept):"Any file type"));
+  if(item.desc) d.appendChild(el("div","hint",item.desc));
+  const fileInput=document.createElement("input");
+  fileInput.type="file"; fileInput.hidden=true;
+  if(item.accept && item.accept!=="*") fileInput.accept=item.accept;
+  d.appendChild(fileInput);
+  const busyLine=el("div","busy",""); busyLine.hidden=true; d.appendChild(busyLine);
+  if(w.allow_skip){
+    const s=el("div","skip"); const sb=el("button",null,"skip this — I don't have it yet");
+    sb.onclick=(e)=>{ e.stopPropagation(); if(busy)return; freezeWidgets(); post({kind:"chip",chip_id:"skip:"+item.key}); };
+    s.appendChild(sb); d.appendChild(s);
+  }
+  d.onclick=()=>{ if(!busy) fileInput.click(); };
+  d.ondragover=e=>{e.preventDefault(); d.classList.add("over");};
+  d.ondragleave=()=>d.classList.remove("over");
+  d.ondrop=e=>{e.preventDefault(); d.classList.remove("over"); if(e.dataTransfer.files[0]) doUpload(e.dataTransfer.files[0]);};
+  fileInput.onchange=()=>{ if(fileInput.files[0]) doUpload(fileInput.files[0]); };
+
+  async function doUpload(file){
+    if(busy)return; busy=true;
+    busyLine.hidden=false; busyLine.textContent="Uploading "+file.name+"…";
+    const fd=new FormData();
+    fd.append("session_id",sessionId); fd.append("item_key",item.key); fd.append("file",file);
+    try{
+      const r=await fetch(API+"/api/upload",{method:"POST",body:fd});
+      if(!r.ok){
+        const err=await r.json().catch(()=>({detail:"upload failed"}));
+        busyLine.textContent=""; busyLine.hidden=true; busy=false;
+        addMsg(err.detail||"That file didn't go through — try again?","sys");
+        return;
+      }
+      freezeWidgets();
+      addMsg("📎 "+file.name,"user");
+      render(await r.json());
+    }catch(e){
+      addMsg("Connection hiccup during upload — try again?","sys");
+    }finally{ busy=false; busyLine.hidden=true; }
+  }
+  return d;
+}
+
+function checklistW(w){
+  const c=el("div","check"); c.appendChild(el("h4",null,w.title||"Checklist"));
+  (w.items||[]).forEach(it=>{
+    const r=el("div","row");
+    const icon = it.status==="uploaded"?"✓": it.status==="skipped"?"–":"○";
+    const cls  = it.status==="uploaded"?"up": it.status==="skipped"?"sk":"pd";
+    r.appendChild(el("span","st "+cls,icon));
+    r.appendChild(el("span",null,it.label));
+    if(it.required && it.status!=="uploaded") r.appendChild(el("span","req","needed for quote"));
+    c.appendChild(r);
+  });
+  return c;
+}
+
+function cardW(w){
+  const c=el("div","card"); c.appendChild(el("h4",null,w.title||""));
+  if(w.body){
+    const b=el("div","body");
+    // minimal markdown: **bold** only, rest as text
+    w.body.split(/(\*\*[^*]+\*\*)/g).forEach(part=>{
+      if(part.startsWith("**")&&part.endsWith("**")) b.appendChild(el("b",null,part.slice(2,-2)));
+      else b.appendChild(document.createTextNode(part));
+    });
+    c.appendChild(b);
+  }
+  if(w.links && w.links.length){
+    const ln=el("div","links");
+    w.links.forEach(l=>{
+      const a=el("a",null,l.label); a.href=l.url||"#";
+      if((l.url||"").startsWith("/api/download")) a.setAttribute("download","");
+      else a.target="_blank";
+      if(!l.url || l.url==="#"){ a.onclick=e=>e.preventDefault(); a.style.opacity=.55; a.title="Available in live mode"; }
+      ln.appendChild(a);
+    });
+    c.appendChild(ln);
+  }
+  return c;
+}
+
+/* ── transport ─────────────────────────────────────────────── */
+async function post(payload){
+  if(busy) return; busy=true; sendBtn.disabled=true; typing(true);
+  try{
+    const r=await fetch(API+"/api/chat",{
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({session_id:sessionId,...payload}),
+    });
+    if(!r.ok) throw new Error("bad status "+r.status);
+    render(await r.json());
+  }catch(e){
+    typing(false);
+    addMsg("Connection hiccup — please try that again.","sys");
+  }finally{ busy=false; sendBtn.disabled=false; input.focus(); }
+}
+
+function sendText(){
+  const t=input.value.trim();
+  if(!t || busy) return;
+  addMsg(t,"user"); freezeWidgets();
+  input.value=""; input.style.height="44px";
+  post({kind:"text",text:t});
+}
+sendBtn.onclick=sendText;
+input.addEventListener("keydown",e=>{
+  if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); sendText(); }
+});
+input.addEventListener("input",()=>{ input.style.height="44px"; input.style.height=Math.min(input.scrollHeight,120)+"px"; });
+
+post({kind:"open"});
+</script>
+</body>
+</html>
