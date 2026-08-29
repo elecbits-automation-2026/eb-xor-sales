@@ -9,6 +9,15 @@ export default function Home() {
       <ThemeToggle />
       <section className="hero">
         <div className="mark">
+          <Image
+            src="/xor-mark.png"
+            alt=""
+            aria-hidden
+            width={56}
+            height={34}
+            priority
+            className="xor-mark"
+          />
           <span className="xor">
             X<b>o</b>R
           </span>

@@ -280,7 +280,8 @@ export default function Chat() {
     <div className="chat">
       <div className="chat-head">
         <div className="avatar" aria-hidden="true">
-          Eb
+          {/* eslint-disable-next-line @next/next/no-img-element -- tiny static asset, no optimization needed */}
+          <img src="/xor-mark.png" alt="" width={24} height={14} />
         </div>
         <div>
           <div className="t">XOR Assist</div>

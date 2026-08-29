@@ -154,6 +154,11 @@ button {
   gap: 12px;
   margin-bottom: 26px;
 }
+.mark .xor-mark {
+  align-self: center;
+  width: 56px;
+  height: auto;
+}
 .mark .xor {
   font-size: 34px;
   font-weight: 800;
@@ -323,11 +328,16 @@ button {
   width: 34px;
   height: 34px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.15);
+  background: #ffffff;
   color: #fff;
   font-family: var(--mono);
   font-size: 13px;
   font-weight: 800;
+}
+.avatar img {
+  display: block;
+  width: 24px;
+  height: auto;
 }
 .chat-head .t {
   font-size: 15px;
