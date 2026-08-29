@@ -102,6 +102,11 @@ async function out(s: SessionRow, messages: string[], widgets: Widget[] = []): P
   const db = getDb();
   for (const m of messages) await db.addMessage(s.id, "assistant", m);
   await db.saveSession(s);
+  // State transitions + lead_ref only — never PII (names, emails, message text).
+  console.info(
+    `xor session=${s.id} state=${s.state}` +
+      (s.data.lead_ref ? ` lead=${s.data.lead_ref}` : ""),
+  );
   return { session_id: s.id, messages, widgets, meta: meta(s) };
 }
 
@@ -195,10 +200,16 @@ export async function handleUpload(
 }
 
 // ─────────────────────────── state handlers ───────────────────────────────
+function parseTrackChip(chipId: string | undefined): Track | null {
+  const t = chipId?.split(":", 2)[1];
+  return t === "ODM" || t === "EMS" || t === "PRODUCT" ? t : null;
+}
+
 async function discover(s: SessionRow, inp: ChatIn, history: Msg[]): Promise<ChatOut> {
   if (inp.kind === "chip") {
     if (inp.chip_id?.startsWith("track:")) {
-      return setTrack(s, inp.chip_id.split(":", 2)[1] as Track);
+      const t = parseTrackChip(inp.chip_id);
+      return t ? setTrack(s, t) : resume(s);
     }
     if (inp.chip_id === "ask") {
       return out(s, ["Ask away — capabilities, certifications, process, anything."]);
@@ -249,7 +260,8 @@ async function trackConfirm(s: SessionRow, inp: ChatIn, history: Msg[]): Promise
       return setTrack(s, s.data.proposed_track as Track);
     }
     if (inp.chip_id?.startsWith("track:")) {
-      return setTrack(s, inp.chip_id.split(":", 2)[1] as Track);
+      const t = parseTrackChip(inp.chip_id);
+      if (t) return setTrack(s, t);
     }
   }
   if (inp.kind === "text" && inp.text) {
@@ -519,6 +531,31 @@ async function productDetails(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
  */
 async function finalize(s: SessionRow): Promise<ChatOut> {
   const db = getDb();
+  const prevState = s.state;
+  // One finalize per session: an atomic state claim, so a concurrent
+  // double-submit cannot insert duplicate leads or funnel rows.
+  const claimed = await db.claimSession(s.id, prevState, "DONE");
+  if (!claimed) {
+    return {
+      session_id: s.id,
+      messages: ["This enquiry is logged and the team will be in touch. Want to raise another one?"],
+      widgets: [chips([{ id: "restart", label: "Start another enquiry" }])],
+      meta: { state: "DONE", track: s.track, progress: null },
+    };
+  }
+  s.state = "DONE";
+  try {
+    return await finalizeWork(s);
+  } catch (err) {
+    // Release the claim so a retry can finalize; the lead was not recorded.
+    s.state = prevState;
+    await db.claimSession(s.id, "DONE", prevState).catch(() => undefined);
+    throw err;
+  }
+}
+
+async function finalizeWork(s: SessionRow): Promise<ChatOut> {
+  const db = getDb();
   const d = s.data;
   if (!d.lead_ref) d.lead_ref = await db.nextLeadRef();
   const c = d.contact;
@@ -575,6 +612,7 @@ async function finalize(s: SessionRow): Promise<ChatOut> {
         drive_folder_url: res.folder_url,
         drive_committed: true,
       });
+      console.info(`xor lead=${d.lead_ref} handoff=drive ok`);
     } catch (err) {
       handoffTrouble = true;
       console.error(`drive handoff failed lead=${d.lead_ref}`, err);
@@ -590,6 +628,7 @@ async function finalize(s: SessionRow): Promise<ChatOut> {
       const { appendFunnelRow } = await import("./sheets");
       await appendFunnelRow(row);
       await db.updateLead(leadId, { sheet_appended: true });
+      console.info(`xor lead=${d.lead_ref} handoff=sheet ok`);
     } catch (err) {
       handoffTrouble = true;
       console.error(`funnel append failed lead=${d.lead_ref}`, err);
@@ -607,7 +646,6 @@ async function finalize(s: SessionRow): Promise<ChatOut> {
     });
   }
 
-  s.state = "DONE";
   d.finalized = true;
   const first = (c.name ?? "").split(/\s+/)[0] ?? "";
   const trackLines: Record<string, string> = {

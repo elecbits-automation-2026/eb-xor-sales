@@ -54,5 +54,6 @@ export async function POST(req: NextRequest) {
 
   const storage_path = `${s.id}/${item.key}--${safe}`;
   const { url, token } = await db.signedUploadUrl(storage_path);
-  return NextResponse.json({ url, token, storage_path, filename: safe });
+  // signedUrl is the published contract name; url is kept as an alias.
+  return NextResponse.json({ signedUrl: url, url, token, storage_path, filename: safe });
 }

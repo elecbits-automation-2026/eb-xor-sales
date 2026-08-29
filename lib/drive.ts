@@ -70,7 +70,26 @@ export function sheets(): sheets_v4.Sheets {
 }
 
 // ── folders + uploads ─────────────────────────────────────────────────────
-async function createFolder(name: string, parent: string): Promise<string> {
+function escapeQuery(s: string): string {
+  return s.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
+/**
+ * Find-or-create, so a replayed handoff (retry cron) converges on ONE
+ * "<lead_ref> <Company>" tree instead of creating duplicates.
+ */
+async function ensureFolder(name: string, parent: string): Promise<string> {
+  const existing = await drive().files.list({
+    q:
+      `name='${escapeQuery(name)}' and '${escapeQuery(parent)}' in parents ` +
+      `and mimeType='${FOLDER_MIME}' and trashed=false`,
+    fields: "files(id)",
+    pageSize: 1,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+  });
+  const found = existing.data.files?.[0]?.id;
+  if (found) return found;
   const res = await drive().files.create({
     requestBody: { name, mimeType: FOLDER_MIME, parents: [parent] },
     fields: "id",
@@ -79,6 +98,25 @@ async function createFolder(name: string, parent: string): Promise<string> {
   const id = res.data.id;
   if (!id) throw new Error(`drive: folder create returned no id for "${name}"`);
   return id;
+}
+
+/** Names already present in a folder — replays skip files that landed. */
+async function listChildNames(parent: string): Promise<Set<string>> {
+  const names = new Set<string>();
+  let pageToken: string | undefined;
+  do {
+    const res = await drive().files.list({
+      q: `'${escapeQuery(parent)}' in parents and trashed=false`,
+      fields: "nextPageToken, files(name)",
+      pageSize: 1000,
+      pageToken,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    });
+    for (const f of res.data.files ?? []) if (f.name) names.add(f.name);
+    pageToken = res.data.nextPageToken ?? undefined;
+  } while (pageToken);
+  return names;
 }
 
 async function uploadBytes(
@@ -126,16 +164,18 @@ export async function driveHandoff(p: DriveHandoffPayload): Promise<DriveResult>
   const parent = cfg.accountsParentFolderId;
   if (!parent) throw new Error("ACCOUNTS_PARENT_FOLDER_ID is not set");
 
-  const rootId = await createFolder(`${p.lead_ref} ${p.company}`.trim(), parent);
+  const rootId = await ensureFolder(`${p.lead_ref} ${p.company}`.trim(), parent);
   const subfolders: Record<string, string> = {};
   for (const sub of ACCOUNT_SUBFOLDERS) {
-    subfolders[sub] = await createFolder(sub, rootId);
+    subfolders[sub] = await ensureFolder(sub, rootId);
   }
   const intakeId = subfolders["00-Intake"];
+  const already = await listChildNames(intakeId);
 
   const db = getDb();
   const fileIds: Record<string, string> = {};
   for (const f of p.files) {
+    if (already.has(f.filename)) continue; // a previous attempt delivered it
     const bytes = await db.getObject(f.storage_path);
     if (!bytes) {
       console.error(
@@ -152,14 +192,16 @@ export async function driveHandoff(p: DriveHandoffPayload): Promise<DriveResult>
   }
 
   const summaryName = `${p.lead_ref}-intake-summary.md`;
-  fileIds[summaryName] = await uploadBytes(
-    intakeId,
-    summaryName,
-    Buffer.from(p.summary_md, "utf-8"),
-    "text/markdown",
-  );
+  if (!already.has(summaryName)) {
+    fileIds[summaryName] = await uploadBytes(
+      intakeId,
+      summaryName,
+      Buffer.from(p.summary_md, "utf-8"),
+      "text/markdown",
+    );
+  }
 
-  if (p.lld) {
+  if (p.lld && !already.has(p.lld.filename)) {
     const bytes = await db.getObject(p.lld.storage_path);
     if (!bytes) {
       console.error(
@@ -185,8 +227,17 @@ export async function driveHandoff(p: DriveHandoffPayload): Promise<DriveResult>
 // ── templates the bot can offer ───────────────────────────────────────────
 /** Nice-to-have links; must never break the chat — any failure returns []. */
 export async function fetchTemplates(): Promise<{ name: string; url: string }[]> {
+  if (cfg.mockDrive) {
+    // Canned list so mock demos still show the "Handy templates" card
+    // (parity with the Python reference's MockDrive).
+    return [
+      { name: "Level-wise BoM template", url: "#" },
+      { name: "Supplier self-assessment", url: "#" },
+      { name: "RFI FAQ", url: "#" },
+    ];
+  }
   const tid = cfg.templatesFolderId;
-  if (!tid || cfg.mockDrive) return [];
+  if (!tid) return [];
   try {
     const res = await drive().files.list({
       q: `'${tid}' in parents and trashed=false`,

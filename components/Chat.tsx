@@ -215,10 +215,14 @@ export default function Chat() {
           storage_path: string;
         };
 
-        // 2. PUT the raw bytes (relative mock URL or absolute Supabase URL)
+        // 2. PUT the raw bytes (relative mock URL or absolute Supabase URL).
+        // x-upsert lets a retried upload overwrite the earlier object.
         const put = await fetch(url, {
           method: "PUT",
-          headers: { "content-type": file.type || "application/octet-stream" },
+          headers: {
+            "content-type": file.type || "application/octet-stream",
+            "x-upsert": "true",
+          },
           body: file,
         });
         if (!put.ok) {

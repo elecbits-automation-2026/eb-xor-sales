@@ -5,6 +5,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 
+import { cfg } from "@/lib/config";
 import { checkExtension, EMS_CHECKLIST } from "@/lib/flows";
 import * as orchestrator from "@/lib/orchestrator";
 import { clientKey, rateLimitOk } from "@/lib/ratelimit";
@@ -58,6 +59,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { detail: "upload not found in storage — please retry the file" },
       { status: 400 },
+    );
+  }
+
+  // Enforce the size limit against the ACTUAL stored object, not the
+  // client-declared byte count from upload-url.
+  if (stat.bytes > cfg.maxUploadMb * 1024 * 1024) {
+    return NextResponse.json(
+      { detail: `File exceeds ${cfg.maxUploadMb} MB` },
+      { status: 413 },
     );
   }
 

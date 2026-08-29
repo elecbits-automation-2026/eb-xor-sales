@@ -59,6 +59,13 @@ export async function POST(req: NextRequest) {
         });
       } else {
         const row = (r.payload as { row?: (string | number)[] }).row ?? [];
+        // The Drive Folder cell (index 11) may have been empty at finalize
+        // time (drive failed first) — refresh it from the lead, which a
+        // drive retry earlier in this run may just have committed.
+        if (row.length > 11 && !row[11]) {
+          const lead = await db.getLead(r.lead_id);
+          if (lead?.drive_folder_url) row[11] = lead.drive_folder_url;
+        }
         await appendFunnelRow(row);
         await db.updateLead(r.lead_id, { sheet_appended: true });
       }

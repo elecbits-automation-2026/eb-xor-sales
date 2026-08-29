@@ -9,6 +9,8 @@ node_modules/
 out/
 *.tsbuildinfo
 coverage/
+test-results/
+playwright-report/
 
 # Python reference scaffold runtime
 reference/data/

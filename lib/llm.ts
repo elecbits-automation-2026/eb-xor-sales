@@ -60,9 +60,11 @@ async function callTool(
 }
 
 function history(msgs: Msg[], userText: string, limit = 12): Anthropic.MessageParam[] {
-  const out: Anthropic.MessageParam[] = msgs
-    .slice(-limit)
-    .map((m) => ({ role: m.role, content: m.content }));
+  // The Messages API requires the first message to be a user turn; the
+  // sliding window can land on an assistant message, so trim the head.
+  const win = msgs.slice(-limit);
+  while (win.length && win[0].role !== "user") win.shift();
+  const out: Anthropic.MessageParam[] = win.map((m) => ({ role: m.role, content: m.content }));
   out.push({ role: "user", content: userText });
   return out;
 }

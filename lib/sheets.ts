@@ -23,7 +23,9 @@ export async function appendFunnelRow(row: (string | number)[]): Promise<void> {
   await api.spreadsheets.values.append({
     spreadsheetId,
     range: `'${tab}'!A1`,
-    valueInputOption: "USER_ENTERED",
+    // RAW: cell text is stored literally — visitor-controlled fields must
+    // never be parsed as formulas (Sheets formula-injection).
+    valueInputOption: "RAW",
     insertDataOption: "INSERT_ROWS",
     requestBody: { values },
   });

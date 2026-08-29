@@ -115,6 +115,24 @@ begin
   return 'XOR-' || to_char(d, 'YYYYMMDD') || '-' || lpad(v::text, 3, '0');
 end $$;
 
+-- Replace a document's chunks atomically: a SQL function runs in one
+-- transaction, so retrieval never observes a half-replaced document and a
+-- failed insert rolls the delete back.
+create or replace function xor.replace_kb_chunks(
+  p_document_id uuid, p_chunks jsonb)
+returns void
+language sql
+set search_path = xor, extensions, public
+as $$
+  delete from xor.kb_chunks where document_id = p_document_id;
+  insert into xor.kb_chunks (document_id, chunk_no, content, embedding)
+  select p_document_id,
+         (c->>'chunk_no')::int,
+         c->>'content',
+         (c->'embedding')::text::vector
+  from jsonb_array_elements(coalesce(p_chunks, '[]'::jsonb)) c;
+$$;
+
 create or replace function xor.match_kb_chunks(
   query_embedding vector(1536), match_count int default 6,
   min_similarity float default 0.30)

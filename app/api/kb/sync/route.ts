@@ -83,12 +83,15 @@ export async function POST(req: NextRequest) {
   let skipped = 0;
   for (const f of files) {
     const prev = existingByDriveId.get(f.id);
+    // modified_at only advances after a SUCCESSFUL replace (via kbSetSynced):
+    // otherwise a transient extract/embed failure would make `unchanged` true
+    // on every later run and the document would serve stale chunks forever.
     const doc = await db.kbUpsertDocument({
       drive_file_id: f.id,
       name: f.name,
       mime_type: f.mimeType || null,
       source_folder: f.sourceFolder,
-      modified_at: f.modifiedTime || null,
+      modified_at: prev?.modified_at ?? null,
     });
     const unchanged =
       prev?.synced_at && sameInstant(prev.modified_at, f.modifiedTime || null);
@@ -110,7 +113,7 @@ export async function POST(req: NextRequest) {
         });
       }
       await db.kbReplaceChunks(doc.id, inputs);
-      await db.kbSetSynced(doc.id);
+      await db.kbSetSynced(doc.id, f.modifiedTime || null);
       updated++;
     } catch (e) {
       skipped++;

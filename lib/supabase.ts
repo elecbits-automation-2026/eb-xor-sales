@@ -104,6 +104,11 @@ export interface Db {
   createSession(): Promise<SessionRow>;
   getSession(id: string): Promise<SessionRow | null>;
   saveSession(row: SessionRow): Promise<void>;
+  /**
+   * Atomic compare-and-swap on sessions.state. Returns false when the row is
+   * no longer in fromState — the caller lost the race and must not proceed.
+   */
+  claimSession(id: string, fromState: SessionState, toState: SessionState): Promise<boolean>;
 
   addMessage(sessionId: string, role: Msg["role"], content: string): Promise<void>;
   recentMessages(sessionId: string, limit: number): Promise<Msg[]>;
@@ -144,7 +149,12 @@ export interface Db {
     modified_at: string | null;
   }): Promise<KbDocRow>;
   kbSetStatus(driveFileIds: string[], status: "active" | "removed"): Promise<void>;
-  kbSetSynced(documentId: string): Promise<void>;
+  /**
+   * Marks a document successfully synced AND advances its modified_at in the
+   * same update — bookkeeping must only move after chunks are replaced, so a
+   * failed extraction stays eligible for retry on the next run.
+   */
+  kbSetSynced(documentId: string, modifiedAt: string | null): Promise<void>;
   kbReplaceChunks(documentId: string, chunks: KbChunkInput[]): Promise<void>;
   kbMatchChunks(embedding: number[], count: number, minSimilarity: number): Promise<KbMatch[]>;
 }
@@ -201,6 +211,22 @@ class SupabaseDb implements Db {
         .eq("id", row.id)
         .select("id"),
     );
+  }
+
+  async claimSession(
+    id: string,
+    fromState: SessionState,
+    toState: SessionState,
+  ): Promise<boolean> {
+    const rows = SupabaseDb.check(
+      await this.client
+        .from("sessions")
+        .update({ state: toState, updated_at: new Date().toISOString() })
+        .eq("id", id)
+        .eq("state", fromState)
+        .select("id"),
+    ) as { id: string }[];
+    return rows.length > 0;
   }
 
   async addMessage(sessionId: string, role: Msg["role"], content: string): Promise<void> {
@@ -312,9 +338,11 @@ class SupabaseDb implements Db {
   }
 
   async signedUploadUrl(path: string): Promise<{ url: string; token: string }> {
+    // upsert so a retried upload (e.g. after a failed upload-complete) does
+    // not 409 on the already-written object.
     const { data, error } = await this.client.storage
       .from(bucket())
-      .createSignedUploadUrl(path);
+      .createSignedUploadUrl(path, { upsert: true });
     if (error || !data) throw new Error(`storage signed url: ${error?.message}`);
     return { url: data.signedUrl, token: data.token };
   }
@@ -373,27 +401,24 @@ class SupabaseDb implements Db {
     );
   }
 
-  async kbSetSynced(documentId: string): Promise<void> {
+  async kbSetSynced(documentId: string, modifiedAt: string | null): Promise<void> {
     SupabaseDb.check(
       await this.client
         .from("kb_documents")
-        .update({ synced_at: new Date().toISOString() })
+        .update({ synced_at: new Date().toISOString(), modified_at: modifiedAt })
         .eq("id", documentId),
     );
   }
 
   async kbReplaceChunks(documentId: string, chunks: KbChunkInput[]): Promise<void> {
-    // Postgres transaction is not exposed through PostgREST; delete + insert
-    // back-to-back is acceptable here (sync runs single-flight from cron).
-    SupabaseDb.check(
-      await this.client.from("kb_chunks").delete().eq("document_id", documentId),
-    );
-    if (!chunks.length) return;
-    SupabaseDb.check(
-      await this.client
-        .from("kb_chunks")
-        .insert(chunks.map((c) => ({ ...c, document_id: documentId }))),
-    );
+    // Delete + insert must be atomic (a failure or a concurrent retrieval
+    // between them would see a chunkless document) — done in one transaction
+    // via the replace_kb_chunks SQL function.
+    const { error } = await this.client.rpc("replace_kb_chunks", {
+      p_document_id: documentId,
+      p_chunks: chunks,
+    });
+    if (error) throw new Error(`supabase rpc replace_kb_chunks: ${error.message}`);
   }
 
   async kbMatchChunks(
@@ -474,6 +499,17 @@ class MemoryDb implements Db {
 
   async saveSession(row: SessionRow): Promise<void> {
     this.s.sessions.set(row.id, structuredClone(row));
+  }
+
+  async claimSession(
+    id: string,
+    fromState: SessionState,
+    toState: SessionState,
+  ): Promise<boolean> {
+    const row = this.s.sessions.get(id);
+    if (!row || row.state !== fromState) return false;
+    row.state = toState;
+    return true;
   }
 
   async addMessage(sessionId: string, role: Msg["role"], content: string): Promise<void> {
@@ -620,9 +656,12 @@ class MemoryDb implements Db {
     }
   }
 
-  async kbSetSynced(documentId: string): Promise<void> {
+  async kbSetSynced(documentId: string, modifiedAt: string | null): Promise<void> {
     for (const row of this.s.kbDocs.values()) {
-      if (row.id === documentId) row.synced_at = new Date().toISOString();
+      if (row.id === documentId) {
+        row.synced_at = new Date().toISOString();
+        row.modified_at = modifiedAt;
+      }
     }
   }
 

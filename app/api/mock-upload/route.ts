@@ -5,6 +5,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 
+import { cfg } from "@/lib/config";
 import { getMemoryDb, usingMemoryDb } from "@/lib/supabase";
 
 export async function PUT(req: NextRequest) {
@@ -17,6 +18,12 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ detail: "invalid or expired upload token" }, { status: 403 });
   }
   const body = new Uint8Array(await req.arrayBuffer());
+  if (body.byteLength > cfg.maxUploadMb * 1024 * 1024) {
+    return NextResponse.json(
+      { detail: `File exceeds ${cfg.maxUploadMb} MB` },
+      { status: 413 },
+    );
+  }
   await getMemoryDb().putObject(
     path,
     body,
