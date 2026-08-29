@@ -1,11 +1,19 @@
 # Secrets — never commit
 .env
+.env*.local
 service-account.json
 
-# Runtime data (sessions contain PII; mock Drive + generated docs live here)
-data/
+# Node / Next.js
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+coverage/
+test-results/
+playwright-report/
 
-# Python
+# Python reference scaffold runtime
+reference/data/
 __pycache__/
 *.py[cod]
 .pytest_cache/

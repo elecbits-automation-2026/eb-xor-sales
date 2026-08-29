@@ -1,98 +1,127 @@
 # XOR Intake Bot
 
-Customer-intake chatbot for the **XoR first page** on elecbits.in. It takes any
-visitor query, works out which engagement track it belongs to — **ODM** (design
-a new product), **EMS** (manufacture an existing design), or **Product** (ready /
-white-label) — then runs the right structured intake:
+The first page of **XoR**, Elecbits' AI-platform brand: a chat-first customer
+intake that triages any visitor query into one of three engagement tracks —
+**ODM** (design a new product), **EMS** (manufacture an existing design),
+**PRODUCT** (ready / white-label) — and captures a complete, structured
+requirement for the sales engineering team.
 
-| Track | What the bot does |
+**Stack:** Next.js 15 (App Router, TypeScript) on Vercel · Supabase
+(Postgres + pgvector + Storage) · Google Drive/Sheets · Claude (Anthropic API).
+
+**Hybrid brain:** the LLM handles *language* (triage, entity extraction,
+grounded Q&A, LLD drafting); a deterministic state machine owns *structure*
+(question order, required files, validation, all writes). The bot can never
+forget to collect a field, and it can never invent a price.
+
+> The original Python/FastAPI scaffold lives under [`reference/`](reference/)
+> — it is the behaviour spec this app was ported from, kept for comparison.
+
+## How the stack splits
+
+| Piece | Owns |
 |---|---|
-| **ODM** | Seven requirement questions → generates a first-cut **LLD draft** the customer can download and the team gets in Drive |
-| **EMS** | Walks through the **build package**: BoM, Gerbers/ODB++, pick-&-place, assembly drawings, STEP, test spec — upload or skip, everything tracked |
-| **Product** | Category → quantity → customization enquiry |
-
-Every completed intake lands in **Google Drive** (a per-customer account folder
-with the standard sub-structure) and as a **new row in the funnel sheet** — the
-two handoffs sales actually uses.
-
-**Hybrid brain:** an LLM (Claude) handles the language — triage, entity
-extraction, Q&A, LLD drafting — while a deterministic state machine owns the
-question order, required files, validation and all writes. The bot can never
-"forget" to collect a field, and it can never invent a price.
-
----
+| **GitHub** | Source of truth, PR review, CI (lint · typecheck · tests) |
+| **Vercel** | The XoR page + all API routes + cron jobs |
+| **Supabase** | Postgres (dedicated **`xor` schema**): sessions, messages, **leads** (the transactional record), files metadata, handoff retries, pgvector KB. Storage bucket for customer uploads |
+| **Google Drive** | Document system of record: account folders, uploads, intake summaries, LLD drafts, funnel sheet — and the KB source folders |
 
 ## Quickstart (zero keys, 2 minutes)
 
 ```bash
-pip install -r requirements.txt
-cp .env.example .env          # defaults: MOCK_LLM=true, MOCK_DRIVE=true
-bash run.sh                   # → http://localhost:8000
+pnpm install
+pnpm dev          # → http://localhost:3000
 ```
 
-Mock mode runs the full experience with keyword-based triage and a local
-"Drive" so anyone can demo it: folders appear under `data/mock_drive/`, funnel
-rows in `data/mock_funnel.csv`.
+With no env at all the app runs fully mocked: keyword triage (`MOCK_LLM`),
+no Google calls (`MOCK_DRIVE`), and an **in-memory DB/Storage driver** that
+activates whenever Supabase creds are absent — the whole intake, uploads
+included, is demoable end-to-end.
 
-Tests: `pip install -r requirements-dev.txt && python -m pytest tests/ -q`
+Tests: `pnpm test` · Types: `pnpm typecheck` · Lint: `pnpm lint`
 
 ## Going live
 
-**1. LLM** — set in `.env`:
+### 1 · Supabase (½ day)
 
-```
-MOCK_LLM=false
-ANTHROPIC_API_KEY=sk-ant-…
-XOR_BOT_MODEL=claude-sonnet-4-5     # pick your current preferred model
-```
+1. Create the project (recommended region `ap-south-1` Mumbai).
+2. Run [`supabase/migrations/0001_init.sql`](supabase/migrations/0001_init.sql)
+   in the SQL editor. Everything lands in a dedicated **`xor` schema** — no
+   collisions with tables other repos keep in the same project.
+3. **Expose the schema:** Dashboard → Settings → API → "Exposed schemas" →
+   add `xor` (the API can't see it otherwise).
+4. Create the **private** Storage bucket `intake-uploads` (50 MB per-file
+   limit). If that name is taken by another app, pick another and set
+   `SUPABASE_BUCKET`.
+5. Copy `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` into Vercel env
+   (server-side only, mark Sensitive). RLS is enabled deny-all on every
+   table — only the service role passes, and the browser never talks to
+   Postgres (files go up via short-lived signed upload URLs).
+6. Decide the embeddings provider **before** go-live — the vector dimension
+   is baked into the migration (default 1536 = OpenAI
+   `text-embedding-3-small`; for Voyage `voyage-3.5` change `vector(1536)`
+   to `vector(1024)` in the migration and set `EMBEDDINGS_DIM=1024`).
+7. PII retention: schedule
+   [`supabase/maintenance/purge_pii.sql`](supabase/maintenance/purge_pii.sql)
+   (pg_cron) — purges sessions/messages of non-converted visitors after
+   90 days; leads persist.
 
-**2. Google Drive backbone** — one-time setup:
+### 2 · Google Cloud + Drive (½ day, mostly waiting on admin)
 
-1. In Google Cloud console: create a project → enable **Drive API** and
-   **Sheets API** → create a **service account** → download its JSON key as
-   `service-account.json` in the repo root.
-2. In Drive: create the accounts folder (recommended: `01-Accounts` under
-   `Eb-07-Sales`) and **share it with the service account's client_email as
-   Editor**. Do the same for the funnel spreadsheet and the templates folder.
-3. Set in `.env`:
+1. Create a service account; enable **Drive API + Sheets API**; download the
+   JSON key and store it base64-encoded:
+   `base64 -w0 key.json` → Vercel env `GOOGLE_SERVICE_ACCOUNT_B64`.
+   **Never commit the key file.**
+2. ⚠ **Put the accounts area on a Shared Drive** (or accept that files the
+   service account creates count against its own 15 GB quota and are owned
+   by it). Recommended: `Eb-07-Sales/01-Accounts` on a Shared Drive, service
+   account as Content Manager. This is the #1 production gotcha.
+3. Share with the SA's `client_email`: the `01-Accounts` parent
+   (Editor/Content Manager), the funnel spreadsheet (Editor), the templates
+   folder (Viewer), and every KB source folder (Viewer).
+4. Create the `XOR Intake` tab on the funnel sheet; grab the spreadsheet ID
+   from its URL (`/spreadsheets/d/<ID>/edit`). The bot writes the header row
+   if the tab is empty.
+5. Verify all folder IDs before wiring them — the Drive migration plan moves
+   folders.
 
-```
-MOCK_DRIVE=false
-ACCOUNTS_PARENT_FOLDER_ID=…    # the 01-Accounts folder ID
-FUNNEL_SPREADSHEET_ID=…        # from the sheet URL: /spreadsheets/d/<ID>/edit
-FUNNEL_SHEET_TAB=XOR Intake    # bot writes the header row if the tab is empty
-TEMPLATES_FOLDER_ID=…          # pre-filled from the Aug-2026 sitemap — verify
-```
+### 3 · Vercel (½ day)
 
-> Folder IDs pre-filled in `config.py` were captured from the Eb-07-Sales
-> sitemap crawl of 14 Aug 2026. Verify them before go-live — the migration
-> plan moves several folders.
+1. Import the GitHub repo — Next.js auto-detects; previews on PRs,
+   production from `main`.
+2. Set every var from [`.env.example`](.env.example); mark secrets Sensitive.
+   Production wants `MOCK_LLM=false`, `MOCK_DRIVE=false`, a real
+   `ANTHROPIC_API_KEY`, and `CRON_SECRET` (any long random string).
+3. Crons ship in [`vercel.json`](vercel.json): KB sync nightly 03:00 IST,
+   handoff retry every 15 min. Vercel automatically sends
+   `Authorization: Bearer $CRON_SECRET` when the env var exists.
+4. Domain: `xor.elecbits.in` → Vercel, or keep it standalone and iframe it
+   into the current site.
+5. Uploads never pass through Vercel (≈4.5 MB body cap) — the browser PUTs
+   directly to Supabase Storage via signed URLs, so Gerber zips up to the
+   bucket's 50 MB limit are fine.
 
-**3. Serve it** — any box that runs Python:
+### 4 · Knowledge base (pgvector RAG)
 
-```bash
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
-
-Put nginx/Caddy in front for TLS, e.g. `xor.elecbits.in` → `localhost:8000`.
-
-## Embedding on the XOR page
-
-The bot ships with a full landing page (`web/index.html`) — hero copy on the
-left, chat on the right — so the simplest deploy is to make it *the* XOR first
-page at `xor.elecbits.in`.
-
-To embed inside an existing page instead:
-
-```html
-<iframe src="https://xor.elecbits.in" style="width:100%;height:720px;border:0;border-radius:18px"></iframe>
-```
-
-or serve the API on a subdomain, copy the `<section class="chat">` block + JS
-into your page, and set `const API = "https://xor-api.elecbits.in"` (then set
-`CORS_ORIGINS=https://elecbits.in` in `.env`).
+1. Pick the KB source folders in Drive (playbook, capability material, FAQ,
+   product catalogue) → `KB_SOURCE_FOLDER_IDS` (comma-separated IDs).
+   **Curate before you embed** — the bot can only leak what you index, so
+   keep financials and NDA material out of source folders.
+2. Set `EMBEDDINGS_API_KEY` (+ provider/model/dim if not the defaults).
+3. First sync: `curl -X POST https://<app>/api/kb/sync -H "Authorization: Bearer $CRON_SECRET"`
+   — exports Docs/PDFs/docx → text, chunks (~1,500 chars / 200 overlap),
+   embeds, upserts. Re-runs are incremental on `modifiedTime`.
+4. Wire-check retrieval in SQL:
+   `select * from xor.match_kb_chunks(<embedding>, 6, 0.30);`
+5. Eval before go-live: ~30 labelled real enquiries → triage accuracy ≥ 90%;
+   ~20 FAQ questions → grounded answers, zero invented facts.
+6. Until the KB is populated (or in mock mode), Q&A falls back to the
+   static customer-safe snapshot in `lib/knowledge.ts` — review that text.
 
 ## What sales receives
+
+**Supabase `xor.leads`** — the transactional record of every lead, written
+*first*, before any Google call.
 
 **Drive** — per intake, under the accounts parent:
 
@@ -102,78 +131,48 @@ XOR-20260829-001 Acme Devices/
 │   ├── XOR-20260829-001-intake-summary.md   ← track, contact, all answers
 │   ├── bom--acme-bom.xlsx                   ← customer uploads (EMS)
 │   ├── gerber--fab_rev3.zip
-│   └── LLD-draft-xxxxxxxx.md                ← generated draft (ODM)
+│   └── LLD-draft-XOR-20260829-001.md        ← generated draft (ODM)
 ├── 01-Research/  02-MoM/  03-Contracts/  04-Quotes-Orders/
 ```
 
-The sub-folders mirror the proposed `01-Accounts` structure from the sitemap,
-so a converted lead's folder is already in the right shape — sales just renames
-it to the `Eb-nn-XX-nnn` account ID on qualification.
-
 **Funnel sheet** — one appended row:
-`Timestamp · Lead ID · Company · Contact · Email · Phone · Track · Summary ·
-Quantity · Timeline · Files · Drive folder link · Source=XOR Bot · Stage=New MQL`
+`Timestamp (IST) · Lead ID · Company · Contact · Email · Phone · Track ·
+Summary · Quantity · Timeline · Files · Drive folder · Source=XOR Bot ·
+Stage=New MQL`
 
-If a Drive/Sheets write ever fails, the intake is preserved at
-`data/generated/<lead>-FAILED-DRIVE.md` with the funnel row inside — a lead is
-never lost to an API error.
+**If a Drive/Sheets write fails** the intake is preserved in
+`xor.handoff_retries` with the full payload; `/api/handoff/retry` (cron,
+15 min) replays with exponential backoff. A lead is never lost and the
+visitor is never blocked. Alert on any unresolved row older than 1 hour.
 
-## Conversation design
+## API surface
 
-```
-            free text                     ┌────────────────────────────┐
- visitor ──────────────► DISCOVER ──────► │ LLM triage:                │
-            or chips        │             │ ODM/EMS/PRODUCT/QUESTION/  │
-                            │             │ UNCLEAR + confidence       │
-                            ▼             └────────────────────────────┘
-                      TRACK_CONFIRM   (≥ TRIAGE_CONFIDENCE → propose;
-                            │          QUESTION → answer, re-invite;
-                            ▼          3 unclear turns → manual chips)
-                        CONTACT  (name/company/email/phone, validated)
-              ┌─────────────┼──────────────────┐
-              ▼             ▼                  ▼
-         ODM_SLOTS     EMS_CHECKLIST     PRODUCT_CATEGORY
-         7 questions   6-file upload     category chips
-              ▼         loop w/ skip           ▼
-         ODM_REVIEW         ▼            PRODUCT_DETAILS
-         (edit / LLD)  EMS_DETAILS             │
-              └─────────────┼──────────────────┘
-                            ▼
-                        FINALIZE → Drive folder + uploads + summary
-                                   + funnel row → DONE
-```
+| Route | Purpose |
+|---|---|
+| `POST /api/chat` | conversation turns (ChatIn → ChatOut) |
+| `POST /api/upload-url` | validates file, issues signed Storage upload URL |
+| `POST /api/upload-complete` | verifies the object, records it, advances the checklist |
+| `GET /api/download/[session]/[file]` | streams the visitor's LLD draft |
+| `POST /api/kb/sync` | Drive → pgvector sync (Bearer `CRON_SECRET`) |
+| `POST /api/handoff/retry` | replays failed Drive/Sheets handoffs (Bearer `CRON_SECRET`) |
+| `GET /api/health` | `{ok, mock_llm, mock_drive}` |
 
-Rules of the hybrid: the LLM never decides *what to collect* (the state
-machine does), and the state machine never parses language (the LLM does).
-Mid-flow free text is still handled — questions during the EMS upload loop get
-answered, then the checklist resumes.
+## Production checklist
 
-## Repo map
+- [ ] Review `lib/knowledge.ts` — it defines what the bot may say publicly
+- [ ] Curate KB source folders; run the first sync; spot-check retrieval
+- [ ] Verify Drive folder IDs; accounts area on a **Shared Drive**
+- [ ] Rate limiting: in-memory token bucket ships by default — add Upstash
+      Ratelimit or Vercel WAF for multi-instance enforcement; captcha only
+      if spam appears
+- [ ] Alerting on `xor.handoff_retries` unresolved > 1 h (a lead must never
+      die silently)
+- [ ] Sentry or Vercel log drains on API routes
+- [ ] Schedule the PII purge (90 days, non-converted sessions)
+- [ ] Soft-launch: `MOCK_LLM=false` with the team for a week, review
+      transcripts, tune `lib/prompts.ts`, then put it on the XoR page
 
-```
-app/
-  main.py          FastAPI: /, /api/chat, /api/upload, /api/download, /healthz
-  orchestrator.py  state machine + finalize (Drive/funnel writes live here)
-  llm.py           triage / slot-extraction / Q&A / LLD — Claude or mock rules
-  prompts.py       all prompt text + tool schemas (tune wording here)
-  flows.py         ODM slots, EMS checklist, forms (tune the intake here)
-  knowledge.py     customer-safe company snapshot — REVIEW BEFORE GO-LIVE
-  drive.py         GoogleDrive + MockDrive backbones (same interface)
-  lld.py           template LLD (mock mode + fallback)
-  sessions.py      JSON-snapshot session store (swap for Redis in prod)
-  config.py        env + folder IDs + funnel columns + product categories
-web/index.html     the XOR page — hero + chat UI (vanilla JS, no build step)
-tests/test_flow.py mock-mode end-to-end: all three tracks + validation
-```
+## Non-goals (bolt on later without rework)
 
-## Production checklist (before real traffic)
-
-- [ ] Review `knowledge.py` — it defines what the bot may say publicly
-- [ ] Verify all Drive folder IDs; create the `01-Accounts` parent
-- [ ] Rate-limit `/api/*` (nginx `limit_req` is enough) + captcha if spammed
-- [ ] Swap `sessions.py` for Redis/Postgres if you run >1 worker
-- [ ] Log review: conversations contain PII — set retention policy
-- [ ] Add real-mode eval set: ~30 labelled real enquiries → check triage accuracy
-- [ ] Alerting on `FAILED-DRIVE` files (a cron that emails sales ops)
-- [ ] Optional next steps: WhatsApp channel via the same `/api/chat` contract;
-      Zoho contact creation in `_finalize`; auto-notify the right pod
+Visitor authentication · WhatsApp channel · Zoho integration · admin
+dashboard · multi-language UI (the bot mirrors Hindi/Hinglish in replies).
