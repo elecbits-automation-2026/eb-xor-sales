@@ -1,6 +1,7 @@
 {
+  "framework": "nextjs",
   "crons": [
     { "path": "/api/kb/sync", "schedule": "30 21 * * *" },
-    { "path": "/api/handoff/retry", "schedule": "*/15 * * * *" }
+    { "path": "/api/handoff/retry", "schedule": "0 1 * * *" }
   ]
 }

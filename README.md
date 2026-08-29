@@ -93,8 +93,13 @@ Tests: `pnpm test` · Types: `pnpm typecheck` · Lint: `pnpm lint`
    Production wants `MOCK_LLM=false`, `MOCK_DRIVE=false`, a real
    `ANTHROPIC_API_KEY`, and `CRON_SECRET` (any long random string).
 3. Crons ship in [`vercel.json`](vercel.json): KB sync nightly 03:00 IST,
-   handoff retry every 15 min. Vercel automatically sends
-   `Authorization: Bearer $CRON_SECRET` when the env var exists.
+   handoff retry daily 06:30 IST. The daily retry schedule is
+   **Hobby-plan-safe** (Hobby rejects sub-daily crons and that fails the
+   whole deployment); on a Pro plan, tighten the retry to
+   `"*/15 * * * *"` for the intended 15-minute replay loop. Vercel
+   automatically sends `Authorization: Bearer $CRON_SECRET` when the env
+   var exists. `"framework": "nextjs"` is pinned there too, so the build
+   is correct even if the project's dashboard preset is stale.
 4. Domain: `xor.elecbits.in` → Vercel, or keep it standalone and iframe it
    into the current site.
 5. Uploads never pass through Vercel (≈4.5 MB body cap) — the browser PUTs
