@@ -21,11 +21,9 @@
   --purple: #7c3aed;
   --coral: #ea580c;
   --mono: var(--font-mono), "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-  --logo-chip: #ffffff;
   --page-glow:
     radial-gradient(1100px 560px at 88% -10%, rgba(37, 99, 235, 0.05), transparent 60%),
     radial-gradient(900px 520px at -12% 110%, rgba(124, 58, 237, 0.04), transparent 60%);
-  --chat-shadow: 0 24px 80px rgba(15, 23, 42, 0.1);
   color-scheme: light;
 }
 
@@ -46,11 +44,9 @@
   --amber: #d97706;
   --purple: #7c3aed;
   --coral: #ea580c;
-  --logo-chip: #f4f6fa;
   --page-glow:
     radial-gradient(1100px 560px at 88% -10%, rgba(37, 99, 235, 0.08), transparent 60%),
     radial-gradient(900px 520px at -12% 110%, rgba(124, 58, 237, 0.05), transparent 60%);
-  --chat-shadow: 0 24px 80px rgba(0, 0, 0, 0.4);
   color-scheme: dark;
 }
 
@@ -131,155 +127,18 @@ button {
   }
 }
 
-/* ── page shell ────────────────────────────────────────────────────────── */
-.shell {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(380px, 560px);
-  gap: 56px;
-  align-items: center;
-  max-width: 1240px;
-  margin: 0 auto;
-  padding: 48px 32px;
-  min-height: 100dvh;
-}
-
-/* ── hero ──────────────────────────────────────────────────────────────── */
-.hero {
-  align-self: center;
-  padding: 12px 4px;
-}
-.mark {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  margin-bottom: 26px;
-}
-.mark .xor-mark {
-  align-self: center;
-  width: 56px;
-  height: auto;
-}
-.mark .xor {
-  font-size: 34px;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-}
-.mark .xor b {
-  color: var(--acc);
-}
-.mark .by {
-  color: var(--txt3);
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-/* The Elecbits wordmark is black+blue on transparency — the chip stays
-   light in BOTH themes so the black mark is always legible. */
-.mark .by-logo {
-  align-self: center;
-  display: inline-flex;
-  align-items: center;
-  padding: 5px 10px;
-  border-radius: 999px;
-  background: var(--logo-chip);
-  border: 1px solid var(--bdr);
-}
-.mark .by-logo img {
-  display: block;
-  height: 22px;
-  width: auto;
-}
-.hero h1 {
-  margin: 0 0 16px;
-  font-size: clamp(28px, 3.6vw, 44px);
-  font-weight: 750;
-  line-height: 1.1;
-  letter-spacing: -0.02em;
-}
-.hero h1 .dim {
-  color: var(--txt2);
-}
-.lede {
-  margin: 0 0 30px;
-  max-width: 46ch;
-  color: var(--txt2);
-}
-.tracks {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  max-width: 460px;
-}
-.track {
-  display: flex;
-  gap: 14px;
-  align-items: flex-start;
-  padding: 14px 16px;
-  background: var(--s1);
-  border: 1px solid var(--bdr);
-  border-radius: 12px;
-  transition: all 0.15s;
-}
-.track:hover {
-  background: var(--s2);
-  border-color: var(--bdr2);
-}
-.track .dot {
-  flex: 0 0 auto;
-  width: 9px;
-  height: 9px;
-  margin-top: 7px;
-  border-radius: 50%;
-}
-.track .t-top {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.track b {
-  font-size: 14px;
-}
-.track .tag {
-  display: inline-flex;
-  align-items: center;
-  padding: 3px 10px;
-  border-radius: 99px;
-  font-family: var(--mono);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  color: var(--txt2);
-  background: color-mix(in srgb, var(--txt2) 12%, transparent);
-}
-.track p {
-  margin: 3px 0 0;
-  font-size: 13px;
-  color: var(--txt2);
-}
-.trust {
-  margin: 30px 0 0;
-  font-size: 12.5px;
-  color: var(--txt3);
-}
-
-/* ── chat panel ────────────────────────────────────────────────────────── */
-.chatwrap {
-  display: flex;
-  min-width: 0;
-}
+/* ── chat — the main pane itself ───────────────────────────────────────────
+   No card, no border, no shadow: the chat owns the pane, Claude-style.
+   Slim top bar, an open centered message column, and one floating composer
+   box that the messages slide underneath. */
 .chat {
+  position: relative;
   display: flex;
+  flex: 1;
   flex-direction: column;
-  width: 100%;
-  height: min(720px, calc(100dvh - 96px));
-  min-height: 540px;
+  min-width: 0;
+  min-height: 0;
   background: var(--bg);
-  border: 1px solid var(--bdr);
-  border-radius: 14px;
-  overflow: hidden;
-  box-shadow: var(--chat-shadow);
 }
 
 /* ── theme toggle (fixed, top-right) ───────────────────────────────────── */
@@ -314,57 +173,80 @@ button {
 :root[data-theme="dark"] .theme-toggle .i-moon {
   display: none;
 }
-.chat-head {
+/* slim, quiet top bar — content sits on the same centered column as the
+   messages; a hairline underlines the full pane width */
+.chat-top {
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--bdr);
+}
+.chat-top-inner {
   display: flex;
   align-items: center;
-  gap: 11px;
-  padding: 13px 16px;
-  background: linear-gradient(135deg, #1e3a8a, #2563eb);
-  color: #fff;
+  gap: 9px;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 780px;
+  height: 52px;
+  margin: 0 auto;
+  padding: 0 24px;
 }
-.avatar {
-  display: grid;
-  place-items: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 8px;
-  background: #ffffff;
-  color: #fff;
-  font-family: var(--mono);
-  font-size: 13px;
-  font-weight: 800;
-}
-.avatar img {
+.chat-top-inner img {
   display: block;
-  width: 24px;
+  width: 20px;
   height: auto;
 }
-.chat-head .t {
-  font-size: 15px;
-  font-weight: 700;
-  color: #fff;
-}
-.chat-head .s {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.6);
+.chat-top-name {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
 }
 .status {
+  min-width: 0;
   margin-left: auto;
-  padding: 3px 10px;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--txt3);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* mobile-only escape hatch to /account — the sidebar is hidden there */
+.chat-top-acct {
+  display: none;
   font-family: var(--mono);
   font-size: 11px;
   font-weight: 600;
-  color: #fff;
-  background: rgba(255, 255, 255, 0.15);
-  border-radius: 99px;
+  letter-spacing: 0.06em;
+  color: var(--txt2);
+  text-decoration: none;
   white-space: nowrap;
+  transition: color 0.15s;
+}
+.chat-top-acct:hover {
+  color: var(--acc);
+}
+/* once the column meets the pane edge, clear the fixed theme toggle */
+@media (max-width: 1180px) {
+  .chat-top-inner {
+    padding-right: 60px;
+  }
 }
 
+/* the pane itself scrolls; content stays on the centered column */
 .log {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  padding: 18px 16px 8px;
+  padding: 26px 0 150px;
   scroll-behavior: smooth;
+}
+.log-col {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 0 24px;
 }
 /* assistant row: 26px Eb avatar + bubble */
 .brow {
@@ -687,45 +569,73 @@ button {
   border-color: var(--bdr);
 }
 
-/* ── composer ──────────────────────────────────────────────────────────── */
+/* ── composer — one floating box the messages slide underneath ─────────── */
 .composer {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  padding: 30px 0 14px;
+  background: linear-gradient(to bottom, transparent, var(--bg) 30px);
+  pointer-events: none;
+}
+.composer-col {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 0 24px;
+  pointer-events: auto;
+}
+.composer-box {
   display: flex;
-  gap: 9px;
-  padding: 12px;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 7px 8px 7px 14px;
   background: var(--s1);
-  border-top: 1px solid var(--bdr);
+  border: 1px solid var(--bdr);
+  border-radius: 14px;
+  box-shadow:
+    0 8px 24px rgba(15, 23, 42, 0.07),
+    0 1px 2px rgba(15, 23, 42, 0.05);
+  transition: border-color 0.15s;
+}
+.composer-box:focus-within {
+  border-color: var(--bdr2);
+}
+:root[data-theme="dark"] .composer-box {
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.45),
+    0 1px 2px rgba(0, 0, 0, 0.4);
 }
 .composer textarea {
   flex: 1;
   height: 46px;
   max-height: 124px;
-  padding: 13px 12px;
+  min-width: 0;
+  padding: 12px 0;
   font: inherit;
-  font-size: 13px;
+  font-size: 13.5px;
   color: var(--txt);
-  background: var(--bg);
-  border: 1px solid var(--bdr);
-  border-radius: 8px;
+  background: none;
+  border: 0;
   outline: none;
   resize: none;
-  transition:
-    border-color 0.15s,
-    box-shadow 0.15s;
 }
-.composer textarea:focus {
-  border-color: var(--acc);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+.composer textarea:focus-visible {
+  outline: none; /* the box's focus-within border carries the signal */
 }
 .send {
   display: grid;
   place-items: center;
   flex: 0 0 auto;
-  width: 46px;
-  height: 46px;
+  width: 34px;
+  height: 34px;
+  margin: 6px 0;
   color: #fff;
   background: var(--acc);
   border: 0;
-  border-radius: 8px;
+  border-radius: 10px;
   cursor: pointer;
   transition: all 0.15s;
 }
@@ -738,75 +648,16 @@ button {
   filter: none;
 }
 .foot {
-  padding: 0 12px 10px;
-  font-size: 11px;
+  margin: 8px 2px 0;
+  font-size: 10.5px;
   color: var(--txt3);
   text-align: center;
-  background: var(--s1);
 }
 
-/* ── mobile: compact header, chat fills the viewport ───────────────────── */
-@media (max-width: 960px) {
-  .shell {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-    padding: 0;
-    height: 100dvh;
-    min-height: 0;
-  }
-  .hero {
-    width: 100%;
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--bdr);
-  }
-  .mark {
-    margin: 0;
-  }
-  .mark .xor {
-    font-size: 24px;
-  }
-  .hero h1,
-  .lede,
-  .tracks,
-  .trust {
-    display: none;
-  }
-  .chatwrap {
-    flex: 1;
-    width: 100%;
-    min-height: 0;
-  }
-  .chat {
-    height: auto;
-    min-height: 0;
-    border: 0;
-    border-radius: 0;
-    box-shadow: none;
-  }
-}
-
-/* ── client account + app shell (appended) ─────────────────────────────────
-   Everything below is additive: the /account experience (Claude-style login
-   + projects shell), the shared sidebar, and the "/" app-shell layout.
-   Tokens and the chat styles above are untouched. */
-
-/* small "My projects →" link (home header, mobile) */
-.acct-link {
-  margin-left: auto;
-  align-self: center;
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  color: var(--txt2);
-  text-decoration: none;
-  white-space: nowrap;
-  transition: color 0.15s;
-}
-.acct-link:hover {
-  color: var(--acc);
-}
+/* ── client account + app shell ────────────────────────────────────────────
+   Everything below serves the gated pages: the /account experience
+   (Claude-style login + projects shell), the shared sidebar, and the "/"
+   app-shell layout around the chat pane styled above. */
 
 /* full-page auth-gate splash — mark + subtle pulse, no view flash */
 @keyframes gatePulse {
@@ -1563,130 +1414,48 @@ button {
   filter: brightness(1.1);
 }
 
-/* ═══ "/" — app shell around the chat ════════════════════════════════════ */
+/* ═══ "/" — app shell around the chat ════════════════════════════════════
+   The main pane IS the chat: no inner header block, no card. All the pane
+   chrome (top bar, column, composer) lives in the .chat styles above. */
 .home {
   display: flex;
   height: 100dvh;
   overflow: hidden;
 }
 .home-main {
+  display: flex;
   flex: 1;
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-  padding: 22px 32px 12px;
   background: var(--bg);
-}
-.home-head {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  width: 100%;
-  max-width: 860px;
-  margin: 0 auto 16px;
-}
-.home-brand {
-  display: none;
-  align-items: center;
-  gap: 8px;
-  color: inherit;
-  text-decoration: none;
-}
-.home-wordmark {
-  font-size: 19px;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-}
-.home-wordmark b {
-  color: var(--acc);
-}
-.home-head-text {
-  min-width: 0;
-}
-.home-head-text h1 {
-  margin: 0;
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: -0.015em;
-}
-.home-head-text p {
-  margin: 3px 0 0;
-  font-size: 13px;
-  color: var(--txt2);
-}
-.home-acct {
-  display: none;
-}
-.home-logo {
-  display: inline-flex;
-  align-items: center;
-  flex: 0 0 auto;
-  margin-left: auto;
-  padding: 6px 12px;
-  background: var(--logo-chip);
-  border: 1px solid var(--bdr);
-  border-radius: 99px;
-}
-.home-logo img {
-  display: block;
-}
-.home-chat {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  width: 100%;
-  max-width: 860px;
-  margin: 0 auto;
-}
-.home-chat .chat {
-  flex: 1;
-  height: auto;
-  min-height: 0;
-}
-.home-trust {
-  width: 100%;
-  max-width: 860px;
-  margin: 9px auto 2px;
-  font-size: 11.5px;
-  color: var(--txt3);
-  text-align: center;
 }
 
 /* ═══ mobile ═════════════════════════════════════════════════════════════ */
 @media (max-width: 960px) {
-  /* "/" — sidebar hidden; compact brand header; chat fills the viewport */
+  /* "/" — sidebar hidden; the chat pane fills the viewport (top bar stays,
+     margins tighten, the /account link appears in the top bar) */
   .side-home {
     display: none;
   }
-  .home-main {
-    padding: 0;
+  .chat-top-inner {
+    padding-left: 16px;
   }
-  .home-head {
-    max-width: none;
-    margin: 0;
-    /* right inset clears the fixed theme toggle */
-    padding: 12px 56px 12px 16px;
-    border-bottom: 1px solid var(--bdr);
-  }
-  .home-brand {
-    display: flex;
-  }
-  .home-head-text,
-  .home-logo,
-  .home-trust {
-    display: none;
-  }
-  .home-acct {
+  .chat-top-acct {
     display: inline;
   }
-  .home-chat {
-    max-width: none;
+  .log {
+    padding-bottom: 132px;
   }
-  .home-chat .chat {
-    border: 0;
-    border-radius: 0;
-    box-shadow: none;
+  .log-col {
+    padding: 0 16px;
+  }
+  .composer {
+    padding: 24px 0 10px;
+  }
+  .composer-col {
+    padding: 0 10px;
+  }
+  .foot {
+    margin-top: 6px;
   }
 
   /* login — single column, panel hidden */
