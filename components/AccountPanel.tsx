@@ -251,8 +251,8 @@ function Transcript({ dealRef }: { dealRef: string }) {
 const JOURNEY: { label: string; note?: string }[] = [
   { label: "Received" },
   {
-    label: "Sales engineering review",
-    note: "Your sales engineer is reviewing this — typically within one working day.",
+    label: "Engineering review",
+    note: "The engineering team is reviewing this — typically within one working day.",
   },
   { label: "Scoping call", note: "The team will reach out to set up a scoping call." },
   { label: "Proposal", note: "A commercial proposal is being prepared for you." },
@@ -399,11 +399,11 @@ function EnquiryDetail({ q, company }: { q: Enquiry; company: string | null }) {
           </a>
         ) : (
           <p className="pv-file-empty">
-            Nothing to download just yet — the moment your sales engineer drafts a document for
+            Nothing to download just yet — the moment the engineering team drafts a document for
             this enquiry, it will appear right here.
           </p>
         )}
-        <p className="pv-docnote">Uploaded files are with the sales engineering team.</p>
+        <p className="pv-docnote">Uploaded files are with the engineering team.</p>
       </section>
 
       <section className="pv-sec">

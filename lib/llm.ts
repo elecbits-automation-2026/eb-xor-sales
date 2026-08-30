@@ -205,7 +205,7 @@ export async function answerQuestion(history_: Msg[], userText: string): Promise
     return (
       "Elecbits is a full-stack ESDM company — design (ODM), EMS " +
       "manufacturing and rapid prototyping under one roof, run on the " +
-      "XoR platform. The sales engineering team can go deeper on a " +
+      "XoR platform. The engineering team can go deeper on a " +
       "call. What are you building?"
     );
   }
@@ -222,7 +222,7 @@ export async function answerQuestion(history_: Msg[], userText: string): Promise
   } catch (err) {
     console.error("qa failed:", err);
     return (
-      "Good question — the sales engineering team will cover that on " +
+      "Good question — the engineering team will pick that up in " +
       "the call. Meanwhile, tell me a bit about what you're building?"
     );
   }

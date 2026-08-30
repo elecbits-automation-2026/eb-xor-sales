@@ -658,7 +658,14 @@ async function odmSlots(s: SessionRow, inp: ChatIn, history: Msg[] = []): Promis
     const probes = (d.slot_probes ??= {});
     probes[asked] = (probes[asked] ?? 0) + 1;
     if (probes[asked] < cfg.maxProbeTurns) {
-      return out(s, [ext.ack || "Could you give me that once more, in a line?"]);
+      // The conversation must ALWAYS end on a question — the ack may carry
+      // substance (the message often advances OTHER slots), but Claude's
+      // next_question is what keeps the intake moving toward the LLD.
+      const reask = ext.nextQuestion?.trim();
+      const msg = reask
+        ? `${ext.ack ?? ""} ${reask}`.trim()
+        : ext.ack || "Could you give me that once more, in a line?";
+      return out(s, [msg]);
     }
     s.data.slots[asked] = inp.text.trim(); // 3rd strike — take it verbatim
   }
@@ -692,7 +699,7 @@ function reviewChips() {
   return [
     { id: "lld:generate", label: "Generate my LLD draft" },
     { id: "lld:edit", label: "Change an answer" },
-    { id: "lld:skip", label: "Skip — connect me to sales" },
+    { id: "lld:skip", label: "Skip — submit as is" },
   ];
 }
 
@@ -1099,7 +1106,7 @@ async function finalizeWork(s: SessionRow): Promise<ChatOut> {
   d.finalized = true;
   const first = (c.name ?? "").split(/\s+/)[0] ?? "";
   const trackLines: Record<string, string> = {
-    ODM: "a sales engineer will review the requirement and your LLD draft, then set up an architecture call",
+    ODM: "the engineering team will review the requirement and your LLD draft, then set up an architecture call",
     EMS: "the team will review your build package and come back with clarifications and a quote plan",
     PRODUCT: "the team will share the matching catalogue and pricing",
   };
