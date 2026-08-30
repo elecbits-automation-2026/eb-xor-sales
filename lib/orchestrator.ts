@@ -14,6 +14,7 @@
 import type { AuthUser } from "./auth-server";
 import { cfg, PRODUCT_CATEGORIES, TRACK_LABELS } from "./config";
 import {
+  ATTACHMENT_ITEM,
   CONTACT_FORM,
   EMS_CHECKLIST,
   EMS_DETAILS_FORM,
@@ -144,6 +145,10 @@ export async function handle(inp: ChatIn, authUser?: AuthUser | null): Promise<C
     return out(fresh, [GREETING], [chips(TRACK_CHIPS)]);
   }
 
+  if (inp.kind === "chip" && inp.chip_id === "back") {
+    return goBack(s);
+  }
+
   // History for the LLM excludes the current message; it is passed alongside.
   const history = await db.recentMessages(s.id, 12);
   if (inp.kind === "text" && inp.text) {
@@ -198,6 +203,73 @@ export async function handle(inp: ChatIn, authUser?: AuthUser | null): Promise<C
 }
 
 /**
+ * One step back through the flow. Purely presentational for identity steps
+ * — anything already ISSUED (client ID, deal ID, register rows, folders)
+ * stays issued; going back just lets the visitor re-answer, and re-answers
+ * overwrite the captured values. resume() re-presents the right prompt.
+ */
+async function goBack(s: SessionRow): Promise<ChatOut> {
+  const d = s.data;
+  switch (s.state) {
+    case "TRACK_CONFIRM":
+    case "CONTACT":
+      s.track = s.state === "CONTACT" ? null : s.track;
+      s.state = "DISCOVER";
+      break;
+    case "CLIENT_INDUSTRY":
+      s.state = "CONTACT";
+      break;
+    case "CLIENT_ORGSIZE":
+      s.state = "CLIENT_INDUSTRY";
+      break;
+    case "PRODUCT_CATEGORY":
+    case "EMS_CHECKLIST":
+    case "ODM_SLOTS": {
+      // Inside a track: step back within it, else to the company questions
+      // (new clients) or the contact form (returning clients).
+      if (s.state === "ODM_SLOTS") {
+        const answered = ODM_SLOTS.filter(([k]) => k in d.slots).map(([k]) => k);
+        const last = answered[answered.length - 1];
+        if (last) {
+          delete d.slots[last];
+          d.expected_slot = last;
+          break;
+        }
+      }
+      if (s.state === "EMS_CHECKLIST") {
+        const keys = Object.keys(d.checklist);
+        const last = keys[keys.length - 1];
+        if (last) {
+          delete d.checklist[last];
+          break;
+        }
+      }
+      s.state = d.org_size ? "CLIENT_ORGSIZE" : "CONTACT";
+      break;
+    }
+    case "PRODUCT_DETAILS":
+      s.state = "PRODUCT_CATEGORY";
+      break;
+    case "EMS_DETAILS":
+      s.state = "EMS_CHECKLIST";
+      break;
+    case "ODM_REVIEW": {
+      const answered = ODM_SLOTS.filter(([k]) => k in d.slots).map(([k]) => k);
+      const last = answered[answered.length - 1];
+      if (last) {
+        delete d.slots[last];
+        d.expected_slot = last;
+      }
+      s.state = "ODM_SLOTS";
+      break;
+    }
+    default:
+      break; // DISCOVER / DONE — nowhere to go
+  }
+  return resume(s);
+}
+
+/**
  * Called by /api/upload-complete after the object is verified in Storage
  * and the lead_files row is recorded.
  */
@@ -206,6 +278,12 @@ export async function handleUpload(
   itemKey: string,
   filename: string,
 ): Promise<ChatOut> {
+  // Ad-hoc attachments (paperclip / paste) never touch the checklist or
+  // advance state — acknowledge and re-present whatever was on screen.
+  if (itemKey === ATTACHMENT_ITEM.key) {
+    const w = resumeWidget(s);
+    return out(s, [`Got it — ${filename} is attached to this enquiry.`], w ? [w] : []);
+  }
   if (s.state !== "EMS_CHECKLIST") {
     const w = resumeWidget(s);
     return out(s, ["Thanks — I've kept that file. Let's continue."], w ? [w] : []);
