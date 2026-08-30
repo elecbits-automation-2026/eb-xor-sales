@@ -948,11 +948,15 @@ async function odmBenchReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
       s.state = "ODM_REVIEW";
       return odmReview(s, { session_id: s.id, kind: "chip", chip_id: "lld:generate" });
     }
-    if (/^\s*(ok(ay)?[\s,.!]*)*(lock(ed)?( it)?|looks (good|right)|perfect|approved?|theek( hai)?|sahi hai)\b/i.test(t)) {
-      return odmBenchReview(s, { session_id: s.id, kind: "chip", chip_id: "bench:accept" });
+    if (sanctionIntent(t)) {
+      s.data.sanction_requested = true;
+      return finalize(s);
     }
-    if (/\b(file (it|this|as is)|submit|final(ise|ize)?d?)\b/i.test(t)) {
+    if (/\b(file (it|this|as is)|submit)\b/i.test(t) && !CHANGE_WORDS.test(t)) {
       return askSanction(s);
+    }
+    if (acceptIntent(t)) {
+      return odmBenchReview(s, { session_id: s.id, kind: "chip", chip_id: "bench:accept" });
     }
   }
   const feedback =
@@ -1014,15 +1018,15 @@ async function odmBenchReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
 async function odmLldReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
   const db = getDb();
   if (inp.kind === "chip" && inp.chip_id === "lld:accept") return askSanction(s);
-  // "file it" / "looks good" in words is an ACCEPT, not a revision request.
-  if (
-    inp.kind === "text" &&
-    inp.text &&
-    /^\s*(ok(ay)?[\s,.!]*)*(file( it| this| as is)?|submit|final(ise|ize)?d?|accept(ed)?|looks (good|right)|approved?|lock it|perfect|theek( hai)?|sahi hai)\b/i.test(
-      inp.text,
-    )
-  ) {
-    return askSanction(s);
+  // "great now lets submit for sanction" / "file it" in words is an ACCEPT
+  // (with sanction named explicitly, the question is already answered) —
+  // never a revision request.
+  if (inp.kind === "text" && inp.text) {
+    if (sanctionIntent(inp.text)) {
+      s.data.sanction_requested = true;
+      return finalize(s);
+    }
+    if (acceptIntent(inp.text)) return askSanction(s);
   }
   const feedback =
     inp.kind === "text" && inp.text
@@ -1090,6 +1094,32 @@ const SANCTION_CHIPS = [
   { id: "sanction:no", label: "Not yet — just file it" },
 ];
 
+// ── review-state text intent ────────────────────────────────────────────
+// Words that signal the customer is CHANGING the document — their presence
+// always wins, so "looks good but tighten section 4" stays a revision.
+const CHANGE_WORDS =
+  /\b(add|change|update|fix|edit|rewrite|revise|redo|remove|replace|instead|section|depth|include|expand|shorten|tighten|improve|badlo|hatao|make (it|the))\b/i;
+
+/** "great now lets submit…", "file it", "approved" — accept, wherever the
+ *  words sit in the sentence, as long as nothing change-like appears. */
+function acceptIntent(t: string): boolean {
+  return (
+    !CHANGE_WORDS.test(t) &&
+    /\b(file( it| this| as is)?|submit|final(ise|ize)?d?|accept(ed)?|looks (good|right)|approved?|lock(ed)?( it| this)?|perfect|great|theek hai|sahi hai|ho gaya|done)\b/i.test(
+      t,
+    )
+  );
+}
+
+/** The customer explicitly asked for sanction — skip the question, apply. */
+function sanctionIntent(t: string): boolean {
+  return (
+    /\bsanction\b/i.test(t) &&
+    !CHANGE_WORDS.test(t) &&
+    !/\b(no|not|nahi|later|don'?t|mat)\b/i.test(t)
+  );
+}
+
 /** The closing question of EVERY ODM filing: apply for project sanction?
  *  Only a sanctioned project gets built (and only then is an engineering
  *  call scheduled) — so the application is the natural last step. */
@@ -1106,16 +1136,16 @@ async function askSanction(s: SessionRow): Promise<ChatOut> {
 }
 
 async function odmSanction(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
+  const t = inp.kind === "text" ? (inp.text ?? "") : "";
+  const saysNo = !!t && /\b(no|nah|nahi|not (yet|now)|later|abhi nahi|don'?t|mat)\b/i.test(t);
   const yes =
     (inp.kind === "chip" && inp.chip_id === "sanction:yes") ||
-    (inp.kind === "text" &&
-      !!inp.text &&
-      /^\s*(yes|yeah|yep|ya|sure|haan?|ji|ok(ay)?|theek|bilkul|go ahead|apply|proceed|chalo)\b/i.test(
-        inp.text,
+    (!!t &&
+      !saysNo &&
+      /\b(yes|yeah|yep|ya|sure|haan?|ji|ok(ay)?|theek|bilkul|go ahead|apply|submit|sanction|proceed|chalo|karo)\b/i.test(
+        t,
       ));
-  const no =
-    (inp.kind === "chip" && inp.chip_id === "sanction:no") ||
-    (inp.kind === "text" && !!inp.text && /^\s*(no|nah|nahi|not (yet|now)|later|abhi nahi)\b/i.test(inp.text));
+  const no = (inp.kind === "chip" && inp.chip_id === "sanction:no") || (!!t && saysNo);
   if (yes || no) {
     s.data.sanction_requested = yes;
     return finalize(s);
