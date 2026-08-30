@@ -19,7 +19,8 @@ export async function trackTask<T>(
   fn: (progress: (detail: string) => void) => Promise<T>,
   opts?: {
     detail?: (result: T) => string | null;
-    failDetail?: string;
+    /** Static line, or derive one from the error — shown on the failed row. */
+    failDetail?: string | ((err: unknown) => string);
   },
 ): Promise<T> {
   if (!sessionId) return fn(() => undefined);
@@ -51,21 +52,16 @@ export async function trackTask<T>(
     }
     return result;
   } catch (err) {
+    const failDetail =
+      (typeof opts?.failDetail === "function" ? opts.failDetail(err) : opts?.failDetail) ??
+      "temporary hiccup — the team is on it";
     if (task) {
       await db
-        .updateTask(task.id, {
-          status: "failed",
-          detail: opts?.failDetail ?? "temporary hiccup — the team is on it",
-        })
+        .updateTask(task.id, { status: "failed", detail: failDetail })
         .catch(() => undefined);
     } else {
       await getDb()
-        .insertTask(
-          sessionId,
-          label,
-          "failed",
-          opts?.failDetail ?? "temporary hiccup — the team is on it",
-        )
+        .insertTask(sessionId, label, "failed", failDetail)
         .catch(() => undefined);
     }
     throw err;

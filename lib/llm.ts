@@ -329,7 +329,16 @@ async function authorDoc(p: {
 }): Promise<string> {
   const stage = p.onStage ?? (() => undefined);
   let lastErr: unknown = new Error(`${p.label}: no attempt ran`);
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) {
+      // Back off before re-trying — rate limits and overloads clear in
+      // seconds, and hammering straight back guarantees the same failure.
+      const msg = lastErr instanceof Error ? lastErr.message : String(lastErr);
+      const throttled = /429|529|rate.?limit|overloaded/i.test(msg);
+      const waitMs = throttled ? 20_000 : 3_000;
+      stage(throttled ? "API is busy — waiting it out, then retrying" : "retrying the draft");
+      await new Promise((r) => setTimeout(r, waitMs));
+    }
     try {
       // Narrate the searches each server round actually ran; a round with
       // none means the engine is past research and writing the document.
@@ -341,7 +350,7 @@ async function authorDoc(p: {
           stage("writing the document");
         }
       };
-      stage(attempt === 0 ? "researching the market (web search on)" : "second pass — first draft was too thin");
+      stage("researching the market (web search on)");
       const msgs: Anthropic.MessageParam[] = [{ role: "user", content: p.userContent }];
       let resp = await createResuming(
         {
