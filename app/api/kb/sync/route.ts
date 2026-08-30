@@ -8,10 +8,12 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { cfg } from "@/lib/config";
 import { exportKbFileText, listKbFiles } from "@/lib/drive";
-import { embed, embeddingsAvailable } from "@/lib/embeddings";
+import { embed, embedderId, embeddingsAvailable } from "@/lib/embeddings";
 import { getDb, type KbChunkInput } from "@/lib/supabase";
 
 export const maxDuration = 300;
+const TIME_BUDGET_MS = 240_000; // stop early; the next run resumes via modifiedTime
+const EMBEDDER_KEY = "kb:embedder";
 
 const CHUNK_SIZE = 1500;
 const CHUNK_OVERLAP = 200;
@@ -79,9 +81,29 @@ export async function POST(req: NextRequest) {
   const existing = await db.kbListDocuments();
   const existingByDriveId = new Map(existing.map((d) => [d.drive_file_id, d]));
 
+  // Vectors from different embedders must never share the index — when the
+  // configured embedder changes (e.g. hash → voyage), everything re-embeds.
+  const embedder = embedderId();
+  let storedEmbedder: string | null = null;
+  try {
+    storedEmbedder = await db.getSetting(EMBEDDER_KEY);
+  } catch {
+    // settings store unavailable — proceed as a normal incremental sync
+  }
+  // Unknown stored embedder with an existing index counts as a mismatch too
+  // (a pre-tracking index could hold vectors from another provider).
+  const forceAll = storedEmbedder !== embedder && (storedEmbedder !== null || existing.length > 0);
+
+  const started = Date.now();
   let updated = 0;
   let skipped = 0;
+  let deferred = 0;
   for (const f of files) {
+    if (Date.now() - started > TIME_BUDGET_MS) {
+      deferred = files.length - updated - skipped;
+      console.warn(`kb sync: time budget hit — ${deferred} files deferred to the next run`);
+      break;
+    }
     const prev = existingByDriveId.get(f.id);
     // modified_at only advances after a SUCCESSFUL replace (via kbSetSynced):
     // otherwise a transient extract/embed failure would make `unchanged` true
@@ -94,7 +116,7 @@ export async function POST(req: NextRequest) {
       modified_at: prev?.modified_at ?? null,
     });
     const unchanged =
-      prev?.synced_at && sameInstant(prev.modified_at, f.modifiedTime || null);
+      !forceAll && prev?.synced_at && sameInstant(prev.modified_at, f.modifiedTime || null);
     if (unchanged) continue;
 
     try {
@@ -121,18 +143,35 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const listedIds = new Set(files.map((f) => f.id));
-  const removedIds = existing
-    .filter((d) => d.status === "active" && !listedIds.has(d.drive_file_id))
-    .map((d) => d.drive_file_id);
-  if (removedIds.length) await db.kbSetStatus(removedIds, "removed");
+  // Removals only on a COMPLETE pass — a time-budget break must not mark
+  // everything beyond the cutoff as gone.
+  let removed = 0;
+  if (!deferred) {
+    const listedIds = new Set(files.map((f) => f.id));
+    const removedIds = existing
+      .filter((d) => d.status === "active" && !listedIds.has(d.drive_file_id))
+      .map((d) => d.drive_file_id);
+    if (removedIds.length) await db.kbSetStatus(removedIds, "removed");
+    removed = removedIds.length;
+  }
+  // Record the embedder only after a COMPLETE pass — a deferred re-embed
+  // must keep forcing until every document carries the new vectors.
+  if (!deferred) {
+    try {
+      await db.setSetting(EMBEDDER_KEY, embedder);
+    } catch {
+      // best-effort — worst case the next run re-checks
+    }
+  }
 
   return NextResponse.json({
     ok: true,
     documents: files.length,
     updated,
     skipped,
-    removed: removedIds.length,
+    deferred,
+    removed,
+    embedder,
   });
 }
 

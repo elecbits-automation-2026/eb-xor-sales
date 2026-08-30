@@ -41,6 +41,7 @@ export async function GET(req: NextRequest) {
     write_probe?: "ok" | { error: string };
     retries?: { pending: number; last_error?: string } | { error: string };
     brain?: { chars: number; age_minutes: number } | "empty" | { error: string };
+    kb?: { documents: number; last_synced: string | null; embedder: string } | { error: string };
   } = {
     ok: true,
     mock_llm: cfg.mockLlm,
@@ -118,6 +119,25 @@ export async function GET(req: NextRequest) {
       }
     } catch (e) {
       body.brain = { error: errText(e) };
+    }
+    // The pgvector knowledge base: how many documents are indexed, when the
+    // last sync completed, and which embedder wrote the vectors.
+    try {
+      const { getDb } = await import("@/lib/supabase");
+      const { embedderId } = await import("@/lib/embeddings");
+      const docs = (await getDb().kbListDocuments()).filter((d) => d.status === "active");
+      const last = docs
+        .map((d) => d.synced_at)
+        .filter(Boolean)
+        .sort()
+        .pop();
+      body.kb = {
+        documents: docs.length,
+        last_synced: (last as string | undefined) ?? null,
+        embedder: embedderId(),
+      };
+    } catch (e) {
+      body.kb = { error: errText(e) };
     }
     try {
       const { getDb } = await import("@/lib/supabase");

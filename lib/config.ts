@@ -101,7 +101,10 @@ export const cfg = {
       .filter(Boolean);
   },
   get embeddingsProvider() {
-    return process.env.EMBEDDINGS_PROVIDER || "openai";
+    // Keyless default: the built-in hash embedder needs no external account,
+    // so RAG works out of the box; a configured key upgrades to real
+    // semantic embeddings (openai/voyage) without touching code.
+    return process.env.EMBEDDINGS_PROVIDER || (this.embeddingsApiKey ? "openai" : "hash");
   },
   get embeddingsApiKey() {
     return process.env.EMBEDDINGS_API_KEY || "";

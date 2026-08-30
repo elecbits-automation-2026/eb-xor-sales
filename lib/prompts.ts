@@ -178,22 +178,46 @@ function brainSection(brain: string): string {
  * (python behaviour). The Drive-doc brain, when present, is appended as a
  * reference section ahead of the per-question excerpts.
  */
-export function buildQaSystem(chunks: KbMatch[], brain = ""): string {
-  if (!chunks.length) return `${SYSTEM_QA}${brainSection(brain)}`;
-  const excerpts = chunks
-    .map((c) => `[from: ${c.document_name}]\n${c.content}`)
-    .join("\n\n");
+function fmtChunks(chunks: KbMatch[]): string {
+  return chunks.map((c) => `[from: ${c.document_name}]\n${c.content}`).join("\n\n");
+}
+
+/**
+ * STABLE half of the QA prompt (rules + brain — cacheable across turns).
+ * The per-question excerpts travel separately in qaExcerpts().
+ */
+export function buildQaStable(hasChunks: boolean, brain = ""): string {
+  if (!hasChunks) return `${SYSTEM_QA}${brainSection(brain)}`;
   return `You are XOR Assist on the Elecbits website. Answer the visitor's
 question using ONLY the knowledge-base excerpts below — properly: a real,
 useful answer (typically 60–150 words), not a brush-off. No prices, no firm
 timelines, no invented facts. Cite the document names you
 used inline, like "(from: <document name>)". If the answer isn't in the
 excerpts, say the sales engineering team will cover it on the call. End with
-one short line inviting them to share what they're building.${brainSection(brain)}
+one short line inviting them to share what they're building.${brainSection(brain)}`;
+}
 
-Knowledge-base excerpts:
+/** VOLATILE half: the retrieved excerpts for this one question ("" if none). */
+export function qaExcerpts(chunks: KbMatch[]): string {
+  if (!chunks.length) return "";
+  return `Knowledge-base excerpts:\n\n${fmtChunks(chunks)}`;
+}
 
-${excerpts}`;
+export function buildQaSystem(chunks: KbMatch[], brain = ""): string {
+  const stable = buildQaStable(chunks.length > 0, brain);
+  const volatile = qaExcerpts(chunks);
+  return volatile ? `${stable}\n\n${volatile}` : stable;
+}
+
+/** STABLE half of the triage prompt (rules + brain — cacheable). */
+export function buildTriageStable(brain = ""): string {
+  return `${SYSTEM_TRIAGE}${brainSection(brain)}`;
+}
+
+/** VOLATILE background chunks for triage/LLD ("" if none). */
+export function kbBackground(chunks: KbMatch[]): string {
+  if (!chunks.length) return "";
+  return `Additional background from the knowledge base (context only):\n\n${fmtChunks(chunks)}`;
 }
 
 /**
@@ -201,16 +225,9 @@ ${excerpts}`;
  * knowledge-base chunks (context only — classification rules stay unchanged).
  */
 export function buildTriageSystem(chunks: KbMatch[], brain = ""): string {
-  const base = `${SYSTEM_TRIAGE}${brainSection(brain)}`;
-  if (!chunks.length) return base;
-  const excerpts = chunks
-    .map((c) => `[from: ${c.document_name}]\n${c.content}`)
-    .join("\n\n");
-  return `${base}
-
-Additional background from the knowledge base (context only):
-
-${excerpts}`;
+  const base = buildTriageStable(brain);
+  const volatile = kbBackground(chunks);
+  return volatile ? `${base}\n\n${volatile}` : base;
 }
 
 // ── LLD draft generation (ODM track) ─────────────────────────────────────
