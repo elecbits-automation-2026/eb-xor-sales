@@ -5,10 +5,11 @@ import * as orchestrator from "@/lib/orchestrator";
 import { clientKey, rateLimitOk } from "@/lib/ratelimit";
 import type { ChatIn } from "@/lib/widgets";
 
-// Finalize (Drive folder + file transfers + Sheets) and the opus LLD
-// generation run inside this route — 120s so a long generation never dies
-// as a "connection hiccup" (Fluid Compute allows this on every plan).
-export const maxDuration = 120;
+// Finalize (Drive folder + file transfers + Sheets) and the opus document
+// generations (LLD / benchmark report, both web-search-assisted) run inside
+// this route — give them the full Fluid Compute window so a long generation
+// never dies as a "connection hiccup".
+export const maxDuration = 300;
 
 const KINDS = new Set(["open", "text", "chip", "form"]);
 

@@ -14,6 +14,7 @@ export type SessionState =
   | "CLIENT_ORGSIZE"
   | "ODM_SLOTS"
   | "ODM_REVIEW"
+  | "ODM_BENCH_REVIEW"
   | "ODM_LLD_REVIEW"
   | "EMS_CHECKLIST"
   | "EMS_DETAILS"
@@ -27,6 +28,8 @@ export interface ChatIn {
   text?: string;
   chip_id?: string;
   form?: { form_id: string; values: Record<string, string> };
+  /** How the text arrived — voice replies stay short and speakable. */
+  channel?: "voice" | "text";
 }
 
 export interface ChatOut {
@@ -111,10 +114,14 @@ export interface SessionData {
   auth_email: string | null; // verified email of that login
   auth_name?: string | null; // display name of that login
   sales_agent?: string | null; // Elecbits contact chosen at signup
-  lld_file: string | null; // filename served for download (branded .docx)
+  lld_file: string | null; // filename served for download (branded .pdf)
   lld_path: string | null; // storage path of the generated LLD deliverable
   /** Storage path of the markdown source — revisions rewrite from this. */
   lld_md_path?: string | null;
+  /** Outcome A — the Product Definition & Benchmark Report deliverable. */
+  bench_file?: string | null;
+  bench_path?: string | null;
+  bench_md_path?: string | null;
   drive: { folder_id?: string; folder_url?: string };
   finalized: boolean;
 }

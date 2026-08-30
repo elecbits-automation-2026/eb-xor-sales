@@ -43,6 +43,7 @@ export async function GET(req: NextRequest) {
       }
     }
     enquiries.push({
+      session_id: l.session_id ?? null,
       deal_id: l.deal_id,
       lead_ref: l.lead_ref,
       track: l.track,
