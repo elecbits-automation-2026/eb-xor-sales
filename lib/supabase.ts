@@ -93,6 +93,23 @@ export interface HandoffRetryRow {
   resolved_at: string | null;
 }
 
+export type TaskStatus = "running" | "completed" | "failed";
+
+/**
+ * One row of the visitor-visible "Background tasks" activity column on the
+ * chat page: a pipeline step (ID issuance, register row, Drive workspace,
+ * an upload) recorded as it runs, polled read-only per session.
+ */
+export interface TaskRow {
+  id: string;
+  session_id: string;
+  label: string;
+  detail: string | null;
+  status: TaskStatus;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface KbDocRow {
   id: string;
   drive_file_id: string;
@@ -157,6 +174,16 @@ export interface Db {
   ): Promise<void>;
   unresolvedHandoffRetries(): Promise<HandoffRetryRow[]>;
   recordHandoffAttempt(id: number, ok: boolean, error?: string): Promise<void>;
+
+  // Background tasks (the activity column on the chat page)
+  insertTask(
+    sessionId: string,
+    label: string,
+    status?: TaskStatus,
+    detail?: string | null,
+  ): Promise<TaskRow>;
+  updateTask(id: string, patch: Partial<Pick<TaskRow, "status" | "detail">>): Promise<void>;
+  tasksForSession(sessionId: string): Promise<TaskRow[]>;
 
   // Storage (private bucket; paths "{session_id}/{item_key}--{filename}"
   // and "{session_id}/generated/{filename}")
@@ -413,6 +440,42 @@ class SupabaseDb implements Db {
     );
   }
 
+  async insertTask(
+    sessionId: string,
+    label: string,
+    status: TaskStatus = "running",
+    detail: string | null = null,
+  ): Promise<TaskRow> {
+    return SupabaseDb.check(
+      await this.client
+        .from("tasks")
+        .insert({ session_id: sessionId, label, status, detail })
+        .select("*")
+        .single(),
+    ) as unknown as TaskRow;
+  }
+
+  async updateTask(id: string, patch: Partial<Pick<TaskRow, "status" | "detail">>): Promise<void> {
+    SupabaseDb.check(
+      await this.client
+        .from("tasks")
+        .update({ ...patch, updated_at: new Date().toISOString() })
+        .eq("id", id)
+        .select("id"),
+    );
+  }
+
+  async tasksForSession(sessionId: string): Promise<TaskRow[]> {
+    return SupabaseDb.check(
+      await this.client
+        .from("tasks")
+        .select("*")
+        .eq("session_id", sessionId)
+        .order("created_at", { ascending: true })
+        .limit(80),
+    ) as unknown as TaskRow[];
+  }
+
   async signedUploadUrl(path: string): Promise<{ url: string; token: string }> {
     // upsert so a retried upload (e.g. after a failed upload-complete) does
     // not 409 on the already-written object.
@@ -521,6 +584,7 @@ interface MemState {
   leadFiles: LeadFileRow[];
   retries: HandoffRetryRow[];
   retrySeq: number;
+  tasks: TaskRow[];
   counters: Map<string, number>;
   objects: Map<string, { data: Uint8Array; contentType: string }>;
   uploadTokens: Map<string, string>; // token -> path
@@ -539,6 +603,7 @@ function memState(): MemState {
       leadFiles: [],
       retries: [],
       retrySeq: 0,
+      tasks: [],
       counters: new Map(),
       objects: new Map(),
       uploadTokens: new Map(),
@@ -720,6 +785,35 @@ class MemoryDb implements Db {
     row.attempts += 1;
     row.last_error = error ?? null;
     row.resolved_at = ok ? new Date().toISOString() : null;
+  }
+
+  async insertTask(
+    sessionId: string,
+    label: string,
+    status: TaskStatus = "running",
+    detail: string | null = null,
+  ): Promise<TaskRow> {
+    const now = new Date().toISOString();
+    const row: TaskRow = {
+      id: randomUUID(),
+      session_id: sessionId,
+      label,
+      detail,
+      status,
+      created_at: now,
+      updated_at: now,
+    };
+    this.s.tasks.push(row);
+    return structuredClone(row);
+  }
+
+  async updateTask(id: string, patch: Partial<Pick<TaskRow, "status" | "detail">>): Promise<void> {
+    const t = this.s.tasks.find((x) => x.id === id);
+    if (t) Object.assign(t, patch, { updated_at: new Date().toISOString() });
+  }
+
+  async tasksForSession(sessionId: string): Promise<TaskRow[]> {
+    return structuredClone(this.s.tasks.filter((t) => t.session_id === sessionId).slice(-80));
   }
 
   async signedUploadUrl(path: string): Promise<{ url: string; token: string }> {

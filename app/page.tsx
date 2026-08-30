@@ -12,6 +12,7 @@
 import Chat from "@/components/Chat";
 import LoginView, { GateLoading, useAuthGate } from "@/components/LoginView";
 import Sidebar from "@/components/Sidebar";
+import TasksPanel from "@/components/TasksPanel";
 import ThemeToggle from "@/components/ThemeToggle";
 import { signOut } from "@/lib/client-auth";
 
@@ -63,6 +64,7 @@ export default function Home() {
       <section className="home-main" aria-label="XOR Assist chat">
         <Chat />
       </section>
+      <TasksPanel />
     </main>
   );
 }

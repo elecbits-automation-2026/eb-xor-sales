@@ -1430,6 +1430,118 @@ button {
   background: var(--bg);
 }
 
+/* ═══ background tasks — right-hand activity column (Claude-Code style) ══
+   Appears only once the session has tasks; the fixed theme toggle sits over
+   its header, so the header keeps clearance on the right. */
+.tasks-panel {
+  display: flex;
+  flex: 0 0 300px;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--s1);
+  border-left: 1px solid var(--bdr);
+}
+.tp-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  height: 52px;
+  padding: 0 56px 0 16px;
+  border-bottom: 1px solid var(--bdr);
+  font-size: 13px;
+  font-weight: 600;
+}
+.tp-live {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--acc);
+  white-space: nowrap;
+}
+.tp-scroll {
+  flex: 1;
+  min-height: 0;
+  padding: 12px;
+  overflow-y: auto;
+}
+.tp-card {
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  background: var(--bg);
+  border: 1px solid var(--bdr);
+  border-radius: 10px;
+}
+.tp-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.tp-status {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 4px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--txt2);
+}
+.tp-status i {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.tp-status.running i {
+  background: var(--acc);
+  animation: pulseDot 0.9s ease infinite;
+}
+.tp-status.completed i {
+  background: var(--green);
+}
+.tp-status.failed i {
+  background: var(--amber);
+}
+.tp-status.failed {
+  color: var(--amber);
+}
+.tp-detail {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--txt3);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.tp-finished {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  width: 100%;
+  padding: 6px 2px;
+  margin: 2px 0 8px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--txt3);
+  transition: color 0.15s;
+}
+.tp-finished:hover {
+  color: var(--acc);
+}
+@media (max-width: 1200px) {
+  .tasks-panel {
+    display: none;
+  }
+}
+
 /* ═══ mobile ═════════════════════════════════════════════════════════════ */
 @media (max-width: 960px) {
   /* "/" — sidebar hidden; the chat pane fills the viewport (top bar stays,

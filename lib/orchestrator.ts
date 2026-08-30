@@ -25,6 +25,7 @@ import {
 } from "./flows";
 import * as llm from "./llm";
 import { getDb, type ClientRow, type SessionRow } from "./supabase";
+import { noteTask, trackTask } from "./tasks";
 import { istHuman, istTimestamp } from "./util";
 import type {
   ChatIn,
@@ -648,24 +649,31 @@ async function resolveClient(s: SessionRow): Promise<ClientRow> {
     }
   } else {
     const { register } = await import("./register");
-    const code = await register().issueClient({
-      company: d.contact.company ?? "",
-      sector: d.sector ?? "Individuals & Other",
-      orgSize: d.org_size ?? "Individual / Unknown (UN)",
-      contactName: d.contact.name ?? "",
-    });
-    client = await db.insertClient({
-      client_code: code,
-      company: d.contact.company ?? "",
-      sector: d.sector,
-      org_size: d.org_size,
-      contact_name: d.contact.name ?? null,
-      email: email || null,
-      phone: d.contact.phone ?? null,
-      auth_user_id: d.auth_user_id,
-      drive_folder_id: null,
-      drive_folder_url: null,
-    });
+    client = await trackTask(
+      s.id,
+      "Issue client ID",
+      async () => {
+        const code = await register().issueClient({
+          company: d.contact.company ?? "",
+          sector: d.sector ?? "Individuals & Other",
+          orgSize: d.org_size ?? "Individual / Unknown (UN)",
+          contactName: d.contact.name ?? "",
+        });
+        return db.insertClient({
+          client_code: code,
+          company: d.contact.company ?? "",
+          sector: d.sector,
+          org_size: d.org_size,
+          contact_name: d.contact.name ?? null,
+          email: email || null,
+          phone: d.contact.phone ?? null,
+          auth_user_id: d.auth_user_id,
+          drive_folder_id: null,
+          drive_folder_url: null,
+        });
+      },
+      { detail: (c) => c.client_code },
+    );
   }
   d.client_id = client.id;
   d.client_code = client.client_code;
@@ -686,7 +694,12 @@ async function finalizeWork(s: SessionRow): Promise<ChatOut> {
   const client = await resolveClient(s);
   if (!d.deal_id) {
     const { register } = await import("./register");
-    d.deal_id = await register().issueDeal(client.client_code, summary.slice(0, 80));
+    d.deal_id = await trackTask(
+      s.id,
+      "Register deal",
+      () => register().issueDeal(client.client_code, summary.slice(0, 80)),
+      { detail: (id) => id },
+    );
   }
   let leadId = d.lead_id;
   if (!leadId) {
@@ -734,10 +747,18 @@ async function finalizeWork(s: SessionRow): Promise<ChatOut> {
   let handoffTrouble = false;
   if (cfg.mockDrive) {
     await db.insertHandoffRetry(leadId, "drive", drivePayload, "MOCK_DRIVE — logged, not sent", true);
+    await noteTask(s.id, "Create Drive workspace", "completed", "demo mode — logged, not sent");
   } else {
     try {
-      const { driveHandoff } = await import("./drive");
-      const res = await driveHandoff(drivePayload);
+      const res = await trackTask(
+        s.id,
+        "Create Drive workspace",
+        async () => {
+          const { driveHandoff } = await import("./drive");
+          return driveHandoff(drivePayload);
+        },
+        { detail: () => d.deal_id ?? null, failDetail: "queued for automatic retry" },
+      );
       d.drive = { folder_id: res.folder_id, folder_url: res.folder_url };
       await db.updateLead(leadId, {
         drive_folder_id: res.folder_id,
@@ -768,10 +789,18 @@ async function finalizeWork(s: SessionRow): Promise<ChatOut> {
   const row = funnelRow(s, summary, quantity, timeline, files.length);
   if (cfg.mockDrive) {
     await db.insertHandoffRetry(leadId, "sheet", { row }, "MOCK_DRIVE — logged, not sent", true);
+    await noteTask(s.id, "Log to sales funnel", "completed", "demo mode — logged, not sent");
   } else {
     try {
-      const { appendFunnelRow } = await import("./sheets");
-      await appendFunnelRow(row);
+      await trackTask(
+        s.id,
+        "Log to sales funnel",
+        async () => {
+          const { appendFunnelRow } = await import("./sheets");
+          await appendFunnelRow(row);
+        },
+        { failDetail: "queued for automatic retry" },
+      );
       await db.updateLead(leadId, { sheet_appended: true });
       console.info(`xor lead=${d.lead_ref} handoff=sheet ok`);
     } catch (err) {
