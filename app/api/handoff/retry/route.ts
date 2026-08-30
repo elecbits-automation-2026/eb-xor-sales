@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { cfg } from "@/lib/config";
 import { flushHandoffRetries } from "@/lib/handoff-flush";
 
-export const maxDuration = 300; // plan ceiling — big backfills need the room
+export const maxDuration = 800; // plan ceiling — big backfills need the room
 
 export async function POST(req: NextRequest) {
   if (!cfg.cronSecret) {

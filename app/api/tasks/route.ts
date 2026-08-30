@@ -13,7 +13,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { cfg } from "@/lib/config";
 import { getDb } from "@/lib/supabase";
 
-export const maxDuration = 60; // poll + up to 3 nudged retries
+export const maxDuration = 120; // poll + up to 3 nudged retries
 
 export async function GET(req: NextRequest) {
   const session = req.nextUrl.searchParams.get("session") ?? "";
