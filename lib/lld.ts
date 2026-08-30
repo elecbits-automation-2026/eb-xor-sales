@@ -97,7 +97,7 @@ Prepared by: Elecbits Sales Engineering / XOR Assist for ${contact["company"] ??
 
 | Dimension | Bench A | Bench B | Our Target |
 |---|---|---|---|
-| Street price | TBD | TBD | ${g("budget")} |
+| Street price | TBD | TBD | ${g("target_unit_cost")} |
 | Core spec | TBD | TBD | ${g("key_features")} |
 
 ## 6. Target Specifications

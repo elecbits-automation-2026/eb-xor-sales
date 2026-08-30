@@ -51,8 +51,7 @@ const TRACK_CHIPS = [
 
 const GREETING =
   "Namaste — I'm XoR from Elecbits. Tell me what you're building, or pick " +
-  "the closest fit below, and I'll capture your requirement exactly the " +
-  "way our engineering team needs it to move fast.";
+  "the closest fit below.";
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
@@ -104,9 +103,18 @@ function meta(s: SessionRow): ChatOut["meta"] {
   return { state: s.state, track: s.track, progress };
 }
 
-async function out(s: SessionRow, messages: string[], widgets: Widget[] = []): Promise<ChatOut> {
+async function out(
+  s: SessionRow,
+  messages: string[],
+  widgets: Widget[] = [],
+  opts: { persist?: boolean } = {},
+): Promise<ChatOut> {
   const db = getDb();
-  for (const m of messages) await db.addMessage(s.id, "assistant", m);
+  // Re-presented prompts (resume on open) are NOT part of the conversation —
+  // persisting them stacked a duplicate "This enquiry is logged…" per reload.
+  if (opts.persist !== false) {
+    for (const m of messages) await db.addMessage(s.id, "assistant", m);
+  }
   await db.saveSession(s);
   // State transitions + lead_ref only — never PII (names, emails, message text).
   console.info(
@@ -141,9 +149,21 @@ export async function handle(inp: ChatIn, authUser?: AuthUser | null): Promise<C
     }
     // Reload of an existing session: hand the stored transcript back so the
     // chat pane shows the whole conversation, not just the resumed prompt.
+    // Collapse consecutive identical assistant lines — transcripts written
+    // before resume prompts stopped being persisted carry stacked copies.
     const past = await db.recentMessages(s.id, 80);
     const res = await resume(s);
-    res.history = past.map((m) => ({ role: m.role, content: m.content }));
+    res.history = past
+      .filter(
+        (m, i) =>
+          !(
+            i > 0 &&
+            m.role === "assistant" &&
+            past[i - 1].role === "assistant" &&
+            past[i - 1].content === m.content
+          ),
+      )
+      .map((m) => ({ role: m.role, content: m.content }));
     return res;
   }
 
@@ -1584,7 +1604,7 @@ async function resume(s: SessionRow): Promise<ChatOut> {
     DONE: "This enquiry is logged. Want to start another?",
   };
   const w = resumeWidget(s);
-  return out(s, [promptsByState[s.state] ?? "Go on…"], w ? [w] : []);
+  return out(s, [promptsByState[s.state] ?? "Go on…"], w ? [w] : [], { persist: false });
 }
 
 function resumeOdmQuestion(s: SessionRow): string {

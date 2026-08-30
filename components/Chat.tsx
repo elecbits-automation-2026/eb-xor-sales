@@ -242,6 +242,31 @@ export default function Chat() {
     void post({ kind: "open" }, stored);
   }, [post]);
 
+  // A sidebar click switches to that deal's conversation in place — a
+  // same-route ?resume= navigation never remounts this component, so the
+  // Sidebar dispatches xor:resume and we re-open the pane ourselves.
+  useEffect(() => {
+    const onResume = (e: Event) => {
+      const sid = (e as CustomEvent<string>).detail;
+      if (!sid || sid === sessionRef.current || busyRef.current) return;
+      setEntries([]);
+      try {
+        const params = new URLSearchParams(window.location.search);
+        params.set("resume", sid);
+        window.history.replaceState(
+          {},
+          "",
+          `${window.location.pathname}?${params.toString()}${window.location.hash}`,
+        );
+      } catch {
+        // URL update is cosmetic — the switch itself still happens
+      }
+      void post({ kind: "open" }, sid);
+    };
+    window.addEventListener("xor:resume", onResume);
+    return () => window.removeEventListener("xor:resume", onResume);
+  }, [post]);
+
   // Auto-scroll on new content.
   useEffect(() => {
     const el = logRef.current;
