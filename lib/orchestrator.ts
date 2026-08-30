@@ -724,13 +724,16 @@ async function finalizeWork(s: SessionRow): Promise<ChatOut> {
 
   const summaryMd = intakeSummary(s);
 
-  // Latest file per checklist item, in checklist order.
+  // Latest file per checklist item, in checklist order. Every artifact
+  // written into the deal folder carries ONE capture timestamp (IST,
+  // filename-safe) — stored in the payload so retries reuse the same names.
+  const stamp = istTimestamp().replace(":", "");
   const allFiles = await db.leadFiles(s.id);
   const latest = new Map<string, { storage_path: string; filename: string }>();
   for (const f of allFiles) latest.set(f.item_key, { storage_path: f.storage_path, filename: f.filename });
   const files = [...latest.entries()].map(([item_key, f]) => ({
     storage_path: f.storage_path,
-    filename: `${item_key}--${f.filename}`,
+    filename: `${stamp} ${item_key}--${f.filename}`,
   }));
 
   const drivePayload = {
@@ -741,7 +744,11 @@ async function finalizeWork(s: SessionRow): Promise<ChatOut> {
     company: c.company ?? "",
     files,
     summary_md: summaryMd,
-    lld: d.lld_path && d.lld_file ? { filename: d.lld_file, storage_path: d.lld_path } : null,
+    lld:
+      d.lld_path && d.lld_file
+        ? { filename: `${stamp} ${d.lld_file}`, storage_path: d.lld_path }
+        : null,
+    stamp,
   };
 
   let handoffTrouble = false;
