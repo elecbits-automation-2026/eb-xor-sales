@@ -24,11 +24,20 @@ export interface SidebarEnquiry {
   deal_id: string | null;
   lead_ref: string;
   summary: string | null;
+  created_at?: string | null;
 }
 
 /** Stable row identity: deal id once assigned, lead ref before that. */
 export function enquiryKey(q: SidebarEnquiry): string {
   return q.deal_id || q.lead_ref;
+}
+
+/** "30 Aug" — compact row date; empty when unknown/invalid. */
+function shortDate(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
 
 type Props =
@@ -127,7 +136,10 @@ export default function Sidebar(props: Props) {
               aria-current={sel ? "true" : undefined}
               onClick={() => props.onSelect(key)}
             >
-              <span className="app-row-id">{key}</span>
+              <span className="app-row-top">
+                <span className="app-row-id">{key}</span>
+                <span className="app-row-date">{shortDate(q.created_at)}</span>
+              </span>
               <span className="app-row-sum">{q.summary || "New enquiry"}</span>
             </button>
           );
@@ -156,7 +168,10 @@ export default function Sidebar(props: Props) {
               className="app-row"
               href={`/account?deal=${encodeURIComponent(key)}`}
             >
-              <span className="app-row-id">{key}</span>
+              <span className="app-row-top">
+                <span className="app-row-id">{key}</span>
+                <span className="app-row-date">{shortDate(q.created_at)}</span>
+              </span>
               <span className="app-row-sum">{q.summary || "New enquiry"}</span>
             </Link>
           );

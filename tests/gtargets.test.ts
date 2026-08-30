@@ -87,30 +87,51 @@ describe("register discovery", () => {
 });
 
 describe("accounts folder discovery", () => {
-  it("creates Eb-07-Sales inside the ULM folder when it doesn't exist", async () => {
+  it("creates Eb-07-Sales + the Accounts subfolder when neither exists", async () => {
     listReturns(
       [], // no Eb-07-Sales yet
       [{ id: "ulm", name: "Eb-Central-ULM ", mimeType: FOLDER }],
+      [], // freshly created sales folder has no children
     );
-    filesCreate.mockResolvedValue({ data: { id: "sales-folder" } });
+    filesCreate
+      .mockResolvedValueOnce({ data: { id: "sales-folder" } })
+      .mockResolvedValueOnce({ data: { id: "acct-folder" } });
 
     const b = await resolveAccountsFolder();
-    expect(b).toMatchObject({ id: "sales-folder", name: "Eb-07-Sales", created: true });
-    expect(filesCreate).toHaveBeenCalledWith(
+    expect(b).toMatchObject({ id: "acct-folder", created: true });
+    expect(filesCreate).toHaveBeenNthCalledWith(
+      1,
       expect.objectContaining({
         requestBody: expect.objectContaining({ name: "Eb-07-Sales", parents: ["ulm"] }),
+      }),
+    );
+    expect(filesCreate).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        requestBody: expect.objectContaining({
+          name: "01-Accounts / Clients",
+          parents: ["sales-folder"],
+        }),
       }),
     );
 
     // cached thereafter
     await resolveAccountsFolder();
-    expect(filesList).toHaveBeenCalledTimes(2);
+    expect(filesList).toHaveBeenCalledTimes(3);
   });
 
-  it("binds an existing Eb-07-Sales directly", async () => {
-    listReturns([{ id: "existing", name: "Eb-07-Sales", mimeType: FOLDER }]);
+  it("binds the existing Accounts subfolder inside Eb-07-Sales — never the root", async () => {
+    listReturns(
+      [{ id: "existing", name: "Eb-07-Sales", mimeType: FOLDER }],
+      [
+        { id: "charter", name: "00-Sales-Charter", mimeType: FOLDER },
+        { id: "acct", name: "01-Accounts / Clients", mimeType: FOLDER },
+        { id: "pipeline", name: "02-Pipeline", mimeType: FOLDER },
+      ],
+    );
     const b = await resolveAccountsFolder();
-    expect(b.id).toBe("existing");
+    expect(b.id).toBe("acct");
+    expect(b.name).toContain("01-Accounts");
     expect(filesCreate).not.toHaveBeenCalled();
   });
 });

@@ -9,16 +9,17 @@
  */
 import Anthropic from "@anthropic-ai/sdk";
 
+import { brainContext } from "@/lib/brain";
 import { cfg } from "@/lib/config";
 import { ODM_SLOT_LABELS } from "@/lib/flows";
 import { retrieveContext } from "@/lib/knowledge";
 import { templateLld } from "@/lib/lld";
 import {
-  SYSTEM_LLD,
-  SYSTEM_SLOTS,
   TOOL_SLOTS,
   TOOL_TRIAGE,
+  buildLldSystem,
   buildQaSystem,
+  buildSlotsSystem,
   buildTriageSystem,
 } from "@/lib/prompts";
 import type { Msg, Track, TriageTrack } from "@/lib/widgets";
@@ -103,10 +104,12 @@ export async function triage(history_: Msg[], userText: string): Promise<TriageR
   if (cfg.mockLlm) return mockTriage(userText);
   try {
     // Retrieval never throws (returns [] on any error), so a KB outage
-    // costs only the extra context, never the triage call itself.
+    // costs only the extra context, never the triage call itself. Same
+    // guarantee from the brain: cached Drive-doc text, or "".
     const chunks = await retrieveContext(userText);
+    const brain = await brainContext();
     const out = await callTool(
-      buildTriageSystem(chunks.slice(0, 3)),
+      buildTriageSystem(chunks.slice(0, 3), brain),
       history(history_, userText),
       TOOL_TRIAGE,
     );
@@ -122,7 +125,8 @@ export async function extractSlots(
   slotsSoFar: Record<string, string>,
   expectedSlot: string | null,
   userText: string,
-): Promise<{ updates: Record<string, string>; ack: string }> {
+  remainingSlots: { key: string; label: string }[] = [],
+): Promise<{ updates: Record<string, string>; ack: string; nextQuestion?: string }> {
   if (cfg.mockLlm) {
     const updates: Record<string, string> = expectedSlot
       ? { [expectedSlot]: userText.trim() }
@@ -133,10 +137,17 @@ export async function extractSlots(
   const context =
     `Slot schema (key -> label):\n${schemaDesc}\n\n` +
     `Values so far: ${JSON.stringify(slotsSoFar)}\n` +
-    `The last question asked about slot: ${expectedSlot}\n\n` +
+    `The last question asked about slot: ${expectedSlot}\n` +
+    `Remaining slots, in order (next_question targets the first one your ` +
+    `updates leave unfilled): ${JSON.stringify(remainingSlots)}\n\n` +
     `Customer message: ${userText}`;
   try {
-    const out = await callTool(SYSTEM_SLOTS, [{ role: "user", content: context }], TOOL_SLOTS);
+    const brain = await brainContext(); // never throws — cached text or ""
+    const out = await callTool(
+      buildSlotsSystem(brain),
+      [{ role: "user", content: context }],
+      TOOL_SLOTS,
+    );
     const raw =
       out.updates && typeof out.updates === "object"
         ? (out.updates as Record<string, unknown>)
@@ -145,12 +156,12 @@ export async function extractSlots(
     for (const [k, v] of Object.entries(raw)) {
       if (k in ODM_SLOT_LABELS && String(v).trim()) updates[k] = String(v);
     }
-    // Guarantee forward progress even if the model returns nothing usable.
-    if (expectedSlot && !(expectedSlot in updates) && !Object.keys(updates).length) {
-      updates[expectedSlot] = userText.trim();
-    }
+    // NO force-fill: when the model judged the message unusable for the
+    // asked slot, the orchestrator re-asks (bounded by maxProbeTurns) —
+    // "paneer pakoda" must never become the product concept.
     const ack = typeof out.ack === "string" && out.ack ? out.ack : "Noted.";
-    return { updates, ack };
+    const nq = typeof out.next_question === "string" ? out.next_question.trim() : "";
+    return { updates, ack, nextQuestion: nq && nq.length <= 300 ? nq : undefined };
   } catch (err) {
     console.error("slot extraction failed; using raw text:", err);
     return {
@@ -172,10 +183,11 @@ export async function answerQuestion(history_: Msg[], userText: string): Promise
   }
   try {
     const chunks = await retrieveContext(userText);
+    const brain = await brainContext(); // never throws — cached text or ""
     const resp = await getClient().messages.create({
       model: cfg.model,
       max_tokens: 400,
-      system: buildQaSystem(chunks),
+      system: buildQaSystem(chunks, brain),
       messages: history(history_, userText),
     });
     return joinText(resp.content);
@@ -199,10 +211,11 @@ export async function generateLld(
     .map(([k, v]) => `- ${ODM_SLOT_LABELS[k] ?? k}: ${v}`)
     .join("\n");
   try {
+    const brain = await brainContext(); // never throws — cached text or ""
     const resp = await getClient().messages.create({
       model: cfg.model,
       max_tokens: 2048,
-      system: SYSTEM_LLD,
+      system: buildLldSystem(brain),
       messages: [
         {
           role: "user",

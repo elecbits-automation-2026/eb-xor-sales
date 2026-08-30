@@ -14,6 +14,7 @@
 import type { AuthUser } from "./auth-server";
 import { cfg, PRODUCT_CATEGORIES, TRACK_LABELS } from "./config";
 import {
+  ATTACHMENT_ITEM,
   CONTACT_FORM,
   EMS_CHECKLIST,
   EMS_DETAILS_FORM,
@@ -33,6 +34,7 @@ import type {
   ChecklistItemDef,
   FormField,
   Msg,
+  SessionData,
   SessionState,
   Track,
   Widget,
@@ -143,6 +145,10 @@ export async function handle(inp: ChatIn, authUser?: AuthUser | null): Promise<C
     return out(fresh, [GREETING], [chips(TRACK_CHIPS)]);
   }
 
+  if (inp.kind === "chip" && inp.chip_id === "back") {
+    return goBack(s);
+  }
+
   // History for the LLM excludes the current message; it is passed alongside.
   const history = await db.recentMessages(s.id, 12);
   if (inp.kind === "text" && inp.text) {
@@ -197,6 +203,73 @@ export async function handle(inp: ChatIn, authUser?: AuthUser | null): Promise<C
 }
 
 /**
+ * One step back through the flow. Purely presentational for identity steps
+ * — anything already ISSUED (client ID, deal ID, register rows, folders)
+ * stays issued; going back just lets the visitor re-answer, and re-answers
+ * overwrite the captured values. resume() re-presents the right prompt.
+ */
+async function goBack(s: SessionRow): Promise<ChatOut> {
+  const d = s.data;
+  switch (s.state) {
+    case "TRACK_CONFIRM":
+    case "CONTACT":
+      s.track = s.state === "CONTACT" ? null : s.track;
+      s.state = "DISCOVER";
+      break;
+    case "CLIENT_INDUSTRY":
+      s.state = "CONTACT";
+      break;
+    case "CLIENT_ORGSIZE":
+      s.state = "CLIENT_INDUSTRY";
+      break;
+    case "PRODUCT_CATEGORY":
+    case "EMS_CHECKLIST":
+    case "ODM_SLOTS": {
+      // Inside a track: step back within it, else to the company questions
+      // (new clients) or the contact form (returning clients).
+      if (s.state === "ODM_SLOTS") {
+        const answered = ODM_SLOTS.filter(([k]) => k in d.slots).map(([k]) => k);
+        const last = answered[answered.length - 1];
+        if (last) {
+          delete d.slots[last];
+          d.expected_slot = last;
+          break;
+        }
+      }
+      if (s.state === "EMS_CHECKLIST") {
+        const keys = Object.keys(d.checklist);
+        const last = keys[keys.length - 1];
+        if (last) {
+          delete d.checklist[last];
+          break;
+        }
+      }
+      s.state = d.org_size ? "CLIENT_ORGSIZE" : "CONTACT";
+      break;
+    }
+    case "PRODUCT_DETAILS":
+      s.state = "PRODUCT_CATEGORY";
+      break;
+    case "EMS_DETAILS":
+      s.state = "EMS_CHECKLIST";
+      break;
+    case "ODM_REVIEW": {
+      const answered = ODM_SLOTS.filter(([k]) => k in d.slots).map(([k]) => k);
+      const last = answered[answered.length - 1];
+      if (last) {
+        delete d.slots[last];
+        d.expected_slot = last;
+      }
+      s.state = "ODM_SLOTS";
+      break;
+    }
+    default:
+      break; // DISCOVER / DONE — nowhere to go
+  }
+  return resume(s);
+}
+
+/**
  * Called by /api/upload-complete after the object is verified in Storage
  * and the lead_files row is recorded.
  */
@@ -205,6 +278,12 @@ export async function handleUpload(
   itemKey: string,
   filename: string,
 ): Promise<ChatOut> {
+  // Ad-hoc attachments (paperclip / paste) never touch the checklist or
+  // advance state — acknowledge and re-present whatever was on screen.
+  if (itemKey === ATTACHMENT_ITEM.key) {
+    const w = resumeWidget(s);
+    return out(s, [`Got it — ${filename} is attached to this enquiry.`], w ? [w] : []);
+  }
   if (s.state !== "EMS_CHECKLIST") {
     const w = resumeWidget(s);
     return out(s, ["Thanks — I've kept that file. Let's continue."], w ? [w] : []);
@@ -288,6 +367,32 @@ async function trackConfirm(s: SessionRow, inp: ChatIn, history: Msg[]): Promise
 
 async function setTrack(s: SessionRow, track: Track): Promise<ChatOut> {
   s.track = track;
+
+  // A signed-in client with a bound record never re-types their details —
+  // we already KNOW them. Prefill from the client row and jump straight
+  // into the track (a fresh deal is still issued for this enquiry).
+  if (s.data.auth_user_id) {
+    const known = await getDb().findClientByAuthUserId(s.data.auth_user_id);
+    if (known?.email) {
+      s.data.contact = {
+        name: known.contact_name ?? "",
+        company: known.company,
+        email: known.email,
+        phone: known.phone ?? "",
+      };
+      s.data.client_id = known.id;
+      s.data.client_code = known.client_code;
+      s.data.sector = s.data.sector ?? known.sector;
+      s.data.org_size = s.data.org_size ?? known.org_size;
+      const first = (known.contact_name ?? "").split(/\s+/)[0] ?? "";
+      return startTrackFlow(
+        s,
+        first,
+        `Welcome back${first ? `, ${first}` : ""} — filing this under ${known.client_code} (${known.company}). `,
+      );
+    }
+  }
+
   s.state = "CONTACT";
   const intro = {
     ODM:
@@ -488,8 +593,28 @@ async function startTrackFlow(s: SessionRow, first: string, prefix = ""): Promis
 
 async function odmSlots(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
   if (inp.kind !== "text" || !inp.text) return resume(s);
-  const ext = await llm.extractSlots(s.data.slots, s.data.expected_slot, inp.text);
+  const remaining = ODM_SLOTS.filter(([k]) => !(k in s.data.slots)).map(([k]) => ({
+    key: k,
+    label: ODM_SLOT_LABELS[k] ?? k,
+  }));
+  const ext = await llm.extractSlots(s.data.slots, s.data.expected_slot, inp.text, remaining);
   Object.assign(s.data.slots, ext.updates ?? {});
+
+  // The asked slot didn't get answered (gibberish / off-topic / test)?
+  // Re-ask conversationally — Claude's ack IS the re-ask — up to
+  // maxProbeTurns per slot; only then accept the raw text so a determined
+  // visitor can still move forward.
+  const asked = s.data.expected_slot;
+  if (asked && !(asked in s.data.slots)) {
+    const d = s.data as SessionData & { slot_probes?: Record<string, number> };
+    const probes = (d.slot_probes ??= {});
+    probes[asked] = (probes[asked] ?? 0) + 1;
+    if (probes[asked] < cfg.maxProbeTurns) {
+      return out(s, [ext.ack || "Could you give me that once more, in a line?"]);
+    }
+    s.data.slots[asked] = inp.text.trim(); // 3rd strike — take it verbatim
+  }
+
   const nxt = ODM_SLOTS.find(([k]) => !(k in s.data.slots));
   if (nxt) {
     const [key, q, hint] = nxt;

@@ -151,6 +151,9 @@ class SheetsRegister implements Register {
           .reduce((m, v) => Math.max(m, parseInt(v.slice(prefix.length), 10) || 0), 0);
         return formatEbId("C", yy, max + 1);
       },
+      // Register v2.0 Clients layout: G is "Drive Folder Link" (left empty —
+      // filled by humans/ops), pushing Date Added/Added By/Contact/Notes to
+      // H..K.
       (id) => [
         id,
         "",
@@ -158,12 +161,13 @@ class SheetsRegister implements Register {
         input.sector,
         input.orgSize,
         "Active",
+        "",
         todayISO(),
         ADDED_BY,
         input.contactName,
         "Created by the XOR intake bot",
       ],
-      "J",
+      "K",
     );
   }
 

@@ -179,6 +179,45 @@ function ProjectsView({
   );
 }
 
+/** The stored chat behind an enquiry — read-only, login-scoped. */
+function Transcript({ dealRef }: { dealRef: string }) {
+  const [msgs, setMsgs] = useState<{ role: string; content: string }[] | "error" | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const token = await getAccessToken();
+        const r = await fetch(`/api/me/transcript?deal=${encodeURIComponent(dealRef)}`, {
+          headers: token ? { authorization: `Bearer ${token}` } : {},
+        });
+        if (!alive) return;
+        if (!r.ok) throw new Error(`bad status ${r.status}`);
+        const b = (await r.json()) as { messages?: { role: string; content: string }[] };
+        if (alive) setMsgs(b.messages ?? []);
+      } catch {
+        if (alive) setMsgs("error");
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [dealRef]);
+
+  if (msgs === null) return <p className="pv-quiet">Loading the conversation…</p>;
+  if (msgs === "error") return <p className="pv-quiet">Couldn&apos;t load the conversation.</p>;
+  if (!msgs.length) return <p className="pv-quiet">No messages stored for this enquiry.</p>;
+  return (
+    <div className="pv-chat">
+      {msgs.map((m, i) => (
+        <div key={i} className={`pv-msg ${m.role === "user" ? "user" : "bot"}`}>
+          {m.content}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── one enquiry, full detail ──────────────────────────────────────────────
 function EnquiryDetail({ q }: { q: Enquiry }) {
   const ref = q.deal_id || q.lead_ref;
@@ -237,6 +276,11 @@ function EnquiryDetail({ q }: { q: Enquiry }) {
         ) : (
           <p className="pv-quiet">Your LLD draft will appear here once generated.</p>
         )}
+      </section>
+
+      <section className="pv-sec">
+        <h2 className="pv-k">Conversation</h2>
+        <Transcript key={ref} dealRef={ref} />
       </section>
 
       <section className="pv-sec">

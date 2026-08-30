@@ -20,10 +20,12 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type ClipboardEvent,
   type KeyboardEvent,
 } from "react";
 
 import { getAccessToken } from "@/lib/client-auth";
+import { ATTACHMENT_ITEM } from "@/lib/flows";
 import type { ChatIn, ChatOut, ChecklistItemDef, SessionState, Widget } from "@/lib/widgets";
 import { WidgetView } from "./widgets";
 
@@ -67,6 +69,7 @@ export default function Chat() {
   const [awaiting, setAwaiting] = useState(false); // typing dots (chat posts only)
   const [status, setStatus] = useState("online");
   const [draft, setDraft] = useState("");
+  const [uiState, setUiState] = useState<SessionState | null>(null); // last meta.state
 
   const busyRef = useRef(false);
   const sessionRef = useRef<string | null>(null);
@@ -74,6 +77,7 @@ export default function Chat() {
   const openedRef = useRef(false);
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const attachRef = useRef<HTMLInputElement>(null);
 
   // ── transcript helpers ──────────────────────────────────────────────────
   const addMsg = useCallback((text: string, who: Who) => {
@@ -105,6 +109,7 @@ export default function Chat() {
     }
     if (additions.length) setEntries((es) => [...es, ...additions]);
 
+    setUiState(res.meta.state);
     const label = STATE_LABELS[res.meta.state] ?? "online";
     setStatus(
       res.meta.progress
@@ -229,9 +234,13 @@ export default function Chat() {
     [freezeAll, post],
   );
 
-  /** Three-step upload — the file itself never goes through /api/chat. */
-  const onFile = useCallback(
-    async (item: ChecklistItemDef, file: File) => {
+  /**
+   * Three-step upload — the file itself never goes through /api/chat.
+   * Shared by the checklist dropzones (onFile) and the ad-hoc attachment
+   * paths (paperclip + paste); only item.key reaches the wire.
+   */
+  const uploadFile = useCallback(
+    async (item: Pick<ChecklistItemDef, "key">, file: File) => {
       if (busyRef.current || !sessionRef.current) return;
       busyRef.current = true;
       setBusy(true);
@@ -307,6 +316,23 @@ export default function Chat() {
     [addMsg, freezeAll, render],
   );
 
+  /** Attach an arbitrary file to the enquiry, whatever the current state. */
+  const sendAttachment = useCallback(
+    (file: File) => {
+      let named = file;
+      if (!file.name) {
+        // Pasted screenshots arrive nameless — synthesize screenshot-<HHMMSS>.
+        const t = new Date();
+        const pad = (n: number) => String(n).padStart(2, "0");
+        const stamp = `${pad(t.getHours())}${pad(t.getMinutes())}${pad(t.getSeconds())}`;
+        const ext = file.type.split("/")[1]?.toLowerCase() || "png";
+        named = new File([file], `screenshot-${stamp}.${ext}`, { type: file.type });
+      }
+      void uploadFile(ATTACHMENT_ITEM, named);
+    },
+    [uploadFile],
+  );
+
   // ── composer ────────────────────────────────────────────────────────────
   const onDraftChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
     setDraft(e.target.value);
@@ -320,6 +346,19 @@ export default function Chat() {
       e.preventDefault();
       sendText();
     }
+  };
+
+  const onAttachPick = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // the same file can be attached again later
+    if (file) sendAttachment(file);
+  };
+
+  const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const file = e.clipboardData?.files?.[0];
+    if (!file) return; // plain text pastes flow into the draft as usual
+    e.preventDefault();
+    sendAttachment(file);
   };
 
   // ── render ──────────────────────────────────────────────────────────────
@@ -358,7 +397,7 @@ export default function Chat() {
             ) : (
               <div key={e.id} className={`wzone${e.frozen ? " frozen" : ""}`} inert={e.frozen}>
                 {e.widgets.map((w, i) => (
-                  <WidgetView key={i} w={w} h={{ busy, onChip, onForm, onSkip, onFile }} />
+                  <WidgetView key={i} w={w} h={{ busy, onChip, onForm, onSkip, onFile: uploadFile }} />
                 ))}
               </div>
             ),
@@ -380,13 +419,51 @@ export default function Chat() {
 
       <div className="composer">
         <div className="composer-col">
+          {uiState && uiState !== "DISCOVER" && uiState !== "DONE" && (
+            <button
+              type="button"
+              className="chat-back"
+              onClick={() => onChip("back")}
+              disabled={busy}
+              aria-label="Go back a step"
+            >
+              ← Back
+            </button>
+          )}
           <div className="composer-box">
+            <button
+              type="button"
+              className="attach"
+              onClick={() => attachRef.current?.click()}
+              disabled={busy}
+              aria-label="Attach a file"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path
+                  d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+            <input
+              ref={attachRef}
+              type="file"
+              hidden
+              accept={ATTACHMENT_ITEM.accept}
+              onChange={onAttachPick}
+              tabIndex={-1}
+              aria-hidden="true"
+            />
             <textarea
               ref={inputRef}
               rows={1}
               value={draft}
               onChange={onDraftChange}
               onKeyDown={onKey}
+              onPaste={onPaste}
               placeholder="Describe what you're building…"
               aria-label="Message"
             />
