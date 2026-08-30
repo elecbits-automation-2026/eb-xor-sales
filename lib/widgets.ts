@@ -102,7 +102,7 @@ export interface SessionData {
   product: Record<string, string>;
   lead_ref: string | null; // XOR-YYYYMMDD-NNN (internal funnel key)
   lead_id: string | null; // leads.id uuid
-  deal_id: string | null; // EB-D-YY-nnnn-ss — the client-facing ref
+  deal_id: string | null; // EB-C-YY-nnnn-Dss — the client-facing ref
   client_id: string | null; // xor.clients.id once resolved
   client_code: string | null; // EB-C-YY-nnnn — reused for returning clients
   sector: string | null; // register Lists sector (new clients)

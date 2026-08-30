@@ -109,7 +109,7 @@ describe("background tasks feed", () => {
     expect(byLabel.get("Issue client ID")?.status).toBe("completed");
     expect(byLabel.get("Issue client ID")?.detail).toMatch(/^EB-C-\d{2}-\d{4}$/);
     expect(byLabel.get("Register deal")?.status).toBe("completed");
-    expect(byLabel.get("Register deal")?.detail).toMatch(/^EB-D-\d{2}-\d{4}-01$/);
+    expect(byLabel.get("Register deal")?.detail).toMatch(/^EB-C-\d{2}-\d{4}-D01$/);
     expect(byLabel.get("Log to sales funnel")?.status).toBe("completed");
     // client-facing failure detail: the retry promise, never the raw error
     const drive = byLabel.get("Create Drive workspace");

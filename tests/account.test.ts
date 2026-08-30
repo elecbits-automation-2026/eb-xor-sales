@@ -3,7 +3,7 @@
  *  - signup → signin → chat with a bearer token → finalize → the enquiry
  *    appears under /api/me/enquiries for THAT login only
  *  - SOP-compliant IDs (Eb-SOP v1.2): clients EB-C-YY-nnnn, deals
- *    EB-D-YY-nnnn-ss (client block verbatim + per-client sequence)
+ *    EB-C-YY-nnnn-Dss (client ID verbatim + D-marked per-client sequence)
  *  - returning clients (same contact email) skip the company questions and
  *    reuse the client code; deal sequence increments
  */
@@ -109,14 +109,14 @@ describe("client IDs and deal IDs", () => {
     const db = getDb();
     const s = await db.getSession(sid);
     expect(s?.data.client_code).toMatch(/^EB-C-\d{2}-\d{4}$/);
-    const dealBlock = s!.data.client_code!.replace(/^EB-C-/, "EB-D-");
-    expect(s?.data.deal_id).toBe(`${dealBlock}-01`);
+    // Eb-SOP v2.0: deal = client ID verbatim + D-marked per-client sequence.
+    expect(s?.data.deal_id).toBe(`${s!.data.client_code}-D01`);
 
     // second enquiry, same contact email → same client, next deal number
     const sid2 = await runProductIntake("meera@bolt.in", undefined, false);
     const s2 = await db.getSession(sid2);
     expect(s2?.data.client_code).toBe(s?.data.client_code);
-    expect(s2?.data.deal_id).toBe(`${dealBlock}-02`);
+    expect(s2?.data.deal_id).toBe(`${s!.data.client_code}-D02`);
 
     // the drive handoff payload carries the client/deal hierarchy
     const retries = (
@@ -143,7 +143,7 @@ describe("account view", () => {
     const body = await mine.json();
     expect(body.client.client_code).toMatch(/^EB-C-\d{2}-\d{4}$/);
     expect(body.enquiries.length).toBe(1);
-    expect(body.enquiries[0].deal_id).toMatch(/^EB-D-\d{2}-\d{4}-01$/);
+    expect(body.enquiries[0].deal_id).toMatch(/^EB-C-\d{2}-\d{4}-D01$/);
     expect(body.enquiries[0].track).toBe("PRODUCT");
 
     // a different login sees nothing of it
