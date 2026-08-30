@@ -89,14 +89,17 @@ export async function POST(req: NextRequest) {
 
   // Deal folder already exists (IDs are issued early)? Deliver the file to
   // Drive right now — best-effort; a failure leaves it staged and the
-  // finalize handoff (with its retry queue) delivers it instead.
+  // finalize handoff (with its retry queue) delivers it instead. The folder
+  // must belong to THIS deal — a session can file more than one deal, and a
+  // stale folder ref would land the file in the previous deal's workspace.
   let taskDetail = item.label;
-  if (!cfg.mockDrive && s.data.drive?.folder_id) {
+  const drive = s.data.drive;
+  if (!cfg.mockDrive && drive?.folder_id && drive.deal_id === s.data.deal_id) {
     try {
       const { uploadStagedFile } = await import("@/lib/drive");
       const stamp = istTimestamp().replace(":", "");
       const driveId = await uploadStagedFile(
-        s.data.drive.folder_id,
+        drive.folder_id,
         `${stamp} ${item.key}--${safe}`,
         expected,
       );

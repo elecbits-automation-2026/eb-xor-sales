@@ -122,7 +122,9 @@ export interface SessionData {
   bench_file?: string | null;
   bench_path?: string | null;
   bench_md_path?: string | null;
-  drive: { folder_id?: string; folder_url?: string };
+  /** Deal folder refs — deal_id stamps WHICH deal they belong to, because a
+   * session can file more than one deal (back-nav, track switches). */
+  drive: { folder_id?: string; folder_url?: string; deal_id?: string };
   finalized: boolean;
 }
 
