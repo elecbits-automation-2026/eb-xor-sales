@@ -713,7 +713,13 @@ async function odmReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
   if (inp.kind === "chip") {
     if (inp.chip_id === "lld:generate") {
       if (!s.data.lead_ref) s.data.lead_ref = await db.nextLeadRef();
-      const lldMd = await llm.generateLld(s.data.slots, s.data.contact, s.data.lead_ref);
+      const transcript = await db.recentMessages(s.id, 40);
+      const lldMd = await llm.generateLld(
+        s.data.slots,
+        s.data.contact,
+        s.data.lead_ref,
+        transcript,
+      );
       const fname = `LLD-draft-${s.data.lead_ref}.md`;
       const path = `${s.id}/generated/${fname}`;
       await db.putObject(path, new TextEncoder().encode(lldMd), "text/markdown");
