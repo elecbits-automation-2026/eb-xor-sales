@@ -16,13 +16,13 @@ import { getDb, type TaskRow } from "./supabase";
 export async function trackTask<T>(
   sessionId: string | null | undefined,
   label: string,
-  fn: () => Promise<T>,
+  fn: (progress: (detail: string) => void) => Promise<T>,
   opts?: {
     detail?: (result: T) => string | null;
     failDetail?: string;
   },
 ): Promise<T> {
-  if (!sessionId) return fn();
+  if (!sessionId) return fn(() => undefined);
   const db = getDb();
   let task: TaskRow | null = null;
   try {
@@ -30,8 +30,14 @@ export async function trackTask<T>(
   } catch (err) {
     console.error(`task insert failed (${label})`, err);
   }
+  // Live sub-stage line on the RUNNING row ("web research: …", "rendering
+  // the branded PDF") — the panel polls every 1.5s while anything runs, so
+  // updates show up as they happen. Fire-and-forget by design.
+  const progress = (detail: string): void => {
+    if (task) void db.updateTask(task.id, { detail }).catch(() => undefined);
+  };
   try {
-    const result = await fn();
+    const result = await fn(progress);
     if (task) {
       await db
         .updateTask(task.id, { status: "completed", detail: opts?.detail?.(result) ?? null })

@@ -72,18 +72,35 @@ function webSearchTool(maxUses: number): Anthropic.Tool {
   } as unknown as Anthropic.Tool;
 }
 
-/** Continue a response the server paused mid-search (stop_reason pause_turn). */
+/** Continue a response the server paused mid-search (stop_reason pause_turn).
+ *  onTurn fires after every server round-trip with that round's response —
+ *  callers use it to narrate live progress (e.g. the searches just run). */
 async function createResuming(
   params: Omit<Anthropic.MessageCreateParamsNonStreaming, "messages">,
   messages: Anthropic.MessageParam[],
+  onTurn?: (resp: Anthropic.Message) => void,
 ): Promise<Anthropic.Message> {
   let msgs = messages;
   let resp = await getClient().messages.create({ ...params, messages: msgs });
+  onTurn?.(resp);
   for (let i = 0; i < 3 && resp.stop_reason === "pause_turn"; i++) {
     msgs = [...msgs, { role: "assistant", content: resp.content }];
     resp = await getClient().messages.create({ ...params, messages: msgs });
+    onTurn?.(resp);
   }
   return resp;
+}
+
+/** The web searches a response actually ran, for progress narration. */
+function searchQueries(resp: Anthropic.Message): string[] {
+  const out: string[] = [];
+  for (const block of resp.content) {
+    if (block.type === "server_tool_use" && block.name === "web_search") {
+      const q = (block.input as { query?: string } | null)?.query;
+      if (q) out.push(q);
+    }
+  }
+  return out;
 }
 
 /**
@@ -307,10 +324,24 @@ async function authorDoc(p: {
   searches: number;
   minChars: number;
   label: string;
+  /** Live sub-stage narration (shows on the running task row). */
+  onStage?: (stage: string) => void;
 }): Promise<string> {
+  const stage = p.onStage ?? (() => undefined);
   let lastErr: unknown = new Error(`${p.label}: no attempt ran`);
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
+      // Narrate the searches each server round actually ran; a round with
+      // none means the engine is past research and writing the document.
+      const narrate = (resp: Anthropic.Message): void => {
+        const qs = searchQueries(resp);
+        if (qs.length) {
+          stage(`web research: "${qs[qs.length - 1]}"${qs.length > 1 ? ` (+${qs.length - 1} more)` : ""}`);
+        } else if (resp.stop_reason !== "pause_turn") {
+          stage("writing the document");
+        }
+      };
+      stage(attempt === 0 ? "researching the market (web search on)" : "second pass — first draft was too thin");
       const msgs: Anthropic.MessageParam[] = [{ role: "user", content: p.userContent }];
       let resp = await createResuming(
         {
@@ -320,11 +351,13 @@ async function authorDoc(p: {
           tools: [webSearchTool(p.searches)],
         },
         msgs,
+        narrate,
       );
       let text = joinText(resp.content);
       // Ran out of output budget mid-document → continue where it stopped
       // (tools off — the research happened in the first pass).
       for (let cont = 0; cont < 2 && resp.stop_reason === "max_tokens" && text; cont++) {
+        stage("long document — continuing where it stopped");
         msgs.push(
           { role: "assistant", content: joinText(resp.content) },
           {
@@ -358,8 +391,10 @@ export async function generateLld(
   leadRef: string,
   recent: Msg[] = [],
   revision?: { prior: string; feedback: string },
+  onStage?: (stage: string) => void,
 ): Promise<string> {
   if (cfg.mockLlm) return templateLld(slots, contact, leadRef);
+  const stage = onStage ?? (() => undefined);
   const brief = Object.entries(slots)
     .map(([k, v]) => `- ${ODM_SLOT_LABELS[k] ?? k}: ${v}`)
     .join("\n");
@@ -370,16 +405,20 @@ export async function generateLld(
     .slice(-30)
     .map((m) => `${m.role === "user" ? "Customer" : "XoR"}: ${m.content.slice(0, 280)}`)
     .join("\n");
+  stage("reading your conversation and the intake");
   const brain = await brainContext(); // never throws — cached text or ""
   // The REAL Elecbits LLD templates (Sales Collateral / LLD) are the
   // authoritative shape of the document; the playbook is the method.
+  stage("loading the house LLD templates from Drive");
   const { lldTemplatesText } = await import("./drive");
   const houseTpl = await lldTemplatesText().catch(() => "");
   // Pull the most relevant company material for THIS product from the
   // pgvector KB — reference designs, SOP sections, past LLD patterns.
+  stage(houseTpl ? "templates loaded — pulling matching knowledge" : "pulling matching knowledge");
   const query = [slots.product_concept, slots.key_features].filter(Boolean).join(" — ");
   const chunks = query ? await retrieveContext(query) : [];
   return authorDoc({
+    onStage,
     system: systemBlocks(buildLldSystem(brain, houseTpl), kbBackground(chunks.slice(0, 6))),
     userContent:
       `Intake ref ${leadRef} for ${contact["company"] ?? "the customer"}.\n` +
@@ -404,8 +443,10 @@ export async function generateBenchmark(
   leadRef: string,
   recent: Msg[] = [],
   revision?: { prior: string; feedback: string },
+  onStage?: (stage: string) => void,
 ): Promise<string> {
   if (cfg.mockLlm) return templateBenchmark(slots, contact, leadRef);
+  const stage = onStage ?? (() => undefined);
   const brief = Object.entries(slots)
     .map(([k, v]) => `- ${ODM_SLOT_LABELS[k] ?? k}: ${v}`)
     .join("\n");
@@ -415,10 +456,12 @@ export async function generateBenchmark(
     .slice(-40)
     .map((m) => `${m.role === "user" ? "Customer" : "XoR"}: ${m.content.slice(0, 400)}`)
     .join("\n");
+  stage("reading your conversation and the intake");
   const brain = await brainContext(); // never throws — cached text or ""
   const query = [slots.product_concept, slots.key_features].filter(Boolean).join(" — ");
   const chunks = query ? await retrieveContext(query) : [];
   return authorDoc({
+    onStage,
     system: systemBlocks(buildBenchmarkSystem(brain), kbBackground(chunks.slice(0, 4))),
     userContent:
       `Intake ref ${leadRef} for ${contact["company"] ?? "the customer"}.\n` +

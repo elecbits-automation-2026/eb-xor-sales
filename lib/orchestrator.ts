@@ -885,14 +885,16 @@ async function odmBenchReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
       fname = await trackTask(
         s.id,
         "Revise the benchmark report",
-        async () => {
+        async (progress) => {
           const benchMd = await llm.generateBenchmark(
             s.data.slots,
             s.data.contact,
             s.data.lead_ref ?? "XOR",
             transcript,
             { prior: priorMd, feedback },
+            progress,
           );
+          progress("rendering the branded PDF");
           return storeDoc(s, "bench", benchMd);
         },
         { detail: (f) => f, failDetail: "revision failed — current report untouched" },
@@ -942,14 +944,16 @@ async function odmLldReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
       fname = await trackTask(
         s.id,
         "Revise the LLD",
-        async () => {
+        async (progress) => {
           const lldMd = await llm.generateLld(
             s.data.slots,
             s.data.contact,
             s.data.lead_ref ?? "XOR",
             transcript,
             { prior: priorMd, feedback },
+            progress,
           );
+          progress("rendering the branded PDF");
           return storeDoc(s, "lld", lldMd);
         },
         { detail: (f) => f, failDetail: "revision failed — current draft untouched" },
@@ -992,13 +996,16 @@ async function odmReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
         fname = await trackTask(
           s.id,
           "Draft the benchmark report",
-          async () => {
+          async (progress) => {
             const benchMd = await llm.generateBenchmark(
               s.data.slots,
               s.data.contact,
               s.data.lead_ref!,
               transcript,
+              undefined,
+              progress,
             );
+            progress("rendering the branded PDF");
             return storeDoc(s, "bench", benchMd);
           },
           { detail: (f) => f, failDetail: "generation failed — hit the chip to retry" },
@@ -1042,13 +1049,16 @@ async function odmReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
         fname = await trackTask(
           s.id,
           "Draft the LLD",
-          async () => {
+          async (progress) => {
             const lldMd = await llm.generateLld(
               s.data.slots,
               s.data.contact,
               s.data.lead_ref!,
               transcript,
+              undefined,
+              progress,
             );
+            progress("rendering the branded PDF");
             return storeDoc(s, "lld", lldMd);
           },
           { detail: (f) => f, failDetail: "generation failed — hit the chip to retry" },
