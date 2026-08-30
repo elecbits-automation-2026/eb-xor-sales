@@ -736,6 +736,10 @@ async function odmSlots(s: SessionRow, inp: ChatIn, history: Msg[] = []): Promis
     inp.channel ?? "text",
   );
   Object.assign(s.data.slots, ext.updates ?? {});
+  // The sidebar row must READ as this deal the moment the product exists —
+  // "2 channel FMS camera", not the provisional track label it was filed
+  // under when the ID was issued early.
+  if (ext.updates?.product_concept) await refreshLeadSummary(s);
 
   // The asked slot didn't get answered (gibberish / off-topic / test)?
   // Re-ask conversationally — Claude's ack IS the re-ask — up to
@@ -1094,6 +1098,23 @@ const SANCTION_CHIPS = [
   { id: "sanction:no", label: "Not yet — just file it" },
 ];
 
+/**
+ * Keep the enquiry's sidebar label in sync with what it actually IS. IDs
+ * are issued before the product is described, so the lead starts life
+ * summarised as its track — the first product_concept overwrites that.
+ * Best-effort: display sugar must never break the intake turn.
+ */
+async function refreshLeadSummary(s: SessionRow): Promise<void> {
+  const d = s.data;
+  const concept = d.slots.product_concept?.trim();
+  if (!d.lead_id || !concept) return;
+  try {
+    await getDb().updateLead(d.lead_id, { summary: concept.slice(0, 200) });
+  } catch (err) {
+    console.error(`lead summary refresh failed session=${s.id}`, err);
+  }
+}
+
 // ── review-state text intent ────────────────────────────────────────────
 // Words that signal the customer is CHANGING the document — their presence
 // always wins, so "looks good but tighten section 4" stays a revision.
@@ -1286,6 +1307,7 @@ async function odmReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
     // Treat stray text as a correction to the whole set.
     const ext = await llm.extractSlots(s.data.slots, null, inp.text);
     Object.assign(s.data.slots, ext.updates ?? {});
+    if (ext.updates?.product_concept) await refreshLeadSummary(s);
     s.state = "ODM_SLOTS";
     return odmSlots(s, { session_id: s.id, kind: "text", text: "." });
   }
