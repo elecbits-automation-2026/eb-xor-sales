@@ -367,6 +367,32 @@ async function trackConfirm(s: SessionRow, inp: ChatIn, history: Msg[]): Promise
 
 async function setTrack(s: SessionRow, track: Track): Promise<ChatOut> {
   s.track = track;
+
+  // A signed-in client with a bound record never re-types their details —
+  // we already KNOW them. Prefill from the client row and jump straight
+  // into the track (a fresh deal is still issued for this enquiry).
+  if (s.data.auth_user_id) {
+    const known = await getDb().findClientByAuthUserId(s.data.auth_user_id);
+    if (known?.email) {
+      s.data.contact = {
+        name: known.contact_name ?? "",
+        company: known.company,
+        email: known.email,
+        phone: known.phone ?? "",
+      };
+      s.data.client_id = known.id;
+      s.data.client_code = known.client_code;
+      s.data.sector = s.data.sector ?? known.sector;
+      s.data.org_size = s.data.org_size ?? known.org_size;
+      const first = (known.contact_name ?? "").split(/\s+/)[0] ?? "";
+      return startTrackFlow(
+        s,
+        first,
+        `Welcome back${first ? `, ${first}` : ""} — filing this under ${known.client_code} (${known.company}). `,
+      );
+    }
+  }
+
   s.state = "CONTACT";
   const intro = {
     ODM:
