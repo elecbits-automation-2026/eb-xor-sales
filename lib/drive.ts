@@ -263,8 +263,11 @@ export async function provisionDealFolders(p: {
 /**
  * Create a document in a Drive folder, or push a NEW VERSION onto an
  * existing one (same file id, Drive keeps version history) — how the living
- * LLD/benchmark DOCX stays a single file through revisions. A stale id
- * (file trashed/deleted by a human) falls back to a fresh create.
+ * LLD/benchmark doc stays a single file through revisions. With `convertTo`
+ * (e.g. the Google Doc mime) Drive converts the uploaded media server-side:
+ * markdown in → a real, editable Google Doc out, headings and tables
+ * rendered properly. A stale id (file trashed/deleted by a human) falls
+ * back to a fresh create.
  */
 export async function uploadOrUpdateDoc(
   folderId: string,
@@ -272,11 +275,26 @@ export async function uploadOrUpdateDoc(
   name: string,
   bytes: Buffer,
   mimeType: string,
+  convertTo?: string,
 ): Promise<string> {
   if (existingFileId) {
     try {
+      // Only version onto a file of the TARGET type — updating a legacy
+      // .docx with markdown media would stuff plain text into it. Anything
+      // else gets a fresh converted create instead.
+      if (convertTo) {
+        const meta = await drive().files.get({
+          fileId: existingFileId,
+          fields: "mimeType,trashed",
+          supportsAllDrives: true,
+        });
+        if (meta.data.trashed || meta.data.mimeType !== convertTo) {
+          throw new Error(`existing file is ${meta.data.mimeType ?? "gone"} — recreating`);
+        }
+      }
       await drive().files.update({
         fileId: existingFileId,
+        requestBody: { name },
         media: { mimeType, body: Readable.from(bytes) },
         supportsAllDrives: true,
       });
@@ -285,8 +303,20 @@ export async function uploadOrUpdateDoc(
       console.error(`doc version update failed (${name}) — creating fresh`, err);
     }
   }
+  if (convertTo) {
+    const res = await drive().files.create({
+      requestBody: { name, parents: [folderId], mimeType: convertTo },
+      media: { mimeType, body: Readable.from(bytes) },
+      fields: "id",
+      supportsAllDrives: true,
+    });
+    return res.data.id!;
+  }
   return uploadBytes(folderId, name, bytes, mimeType);
 }
+
+/** Drive's native document type — targets for server-side conversion. */
+export const GOOGLE_DOC_MIME = "application/vnd.google-apps.document";
 
 export async function uploadStagedFile(
   folderId: string,

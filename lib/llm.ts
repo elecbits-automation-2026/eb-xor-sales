@@ -365,7 +365,7 @@ async function authorDoc(p: {
       let text = joinText(resp.content);
       // Ran out of output budget mid-document → continue where it stopped
       // (tools off — the research happened in the first pass).
-      for (let cont = 0; cont < 2 && resp.stop_reason === "max_tokens" && text; cont++) {
+      for (let cont = 0; cont < 4 && resp.stop_reason === "max_tokens" && text; cont++) {
         stage("long document — continuing where it stopped");
         msgs.push(
           { role: "assistant", content: joinText(resp.content) },
@@ -382,7 +382,23 @@ async function authorDoc(p: {
         );
         text += joinText(resp.content);
       }
-      const clean = stripCites(text).trim();
+      // A document that is STILL truncated does not ship — a customer PDF
+      // ending mid-table is a defect, not a deliverable.
+      if (resp.stop_reason === "max_tokens") {
+        lastErr = new Error(`${p.label} still truncated after continuations`);
+        console.error(String(lastErr));
+        continue;
+      }
+      let clean = stripCites(text).trim();
+      // Preamble ("I'll anchor the reference set…") before the title is
+      // chatter, not document — cut everything before the first heading.
+      if (!clean.startsWith("#")) {
+        const h = clean.indexOf("\n# ");
+        if (h > -1 && h < 800) clean = clean.slice(h + 1).trim();
+      }
+      // Last-line insurance: a dangling half table row from an edge-path
+      // stop never reaches the renderer.
+      clean = clean.replace(/\n\|[^\n]*$/, "").trimEnd();
       if (clean.length >= p.minChars) return clean;
       lastErr = new Error(`${p.label} came back too thin (${clean.length} chars)`);
       console.error(String(lastErr));
@@ -438,9 +454,9 @@ export async function generateLld(
           `The customer reviewed it and asks:\n${revision.feedback}\n\n` +
           `Rewrite the COMPLETE LLD applying the requested changes (every section).`
         : `Write the LLD draft.`),
-    maxTokens: 8000,
+    maxTokens: 16000,
     searches: 5,
-    minChars: 4000,
+    minChars: 9000,
     label: "LLD generation",
   });
 }
@@ -481,9 +497,9 @@ export async function generateBenchmark(
           `The customer reviewed it and asks:\n${revision.feedback}\n\n` +
           `Rewrite the COMPLETE report applying the requested changes.`
         : `Write the Product Definition & Benchmark Report.`),
-    maxTokens: 8000,
+    maxTokens: 12000,
     searches: 8, // the bench: re-verify listings, fill gaps
-    minChars: 3000,
+    minChars: 7000,
     label: "benchmark generation",
   });
 }

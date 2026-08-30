@@ -218,7 +218,10 @@ HARD RULES: never write "to be drafted", "to be proposed", "engineering to
 complete", or defer content to a later session or call — make the
 engineering call yourself, with concrete candidate parts, values and
 calculations, and mark it (assumption) with an OI row when unconfirmed. A
-section that ships hollow is a defect.`;
+section that ships hollow is a defect. Output ONLY the document markdown,
+starting at the "# " title — no preamble, no "I'll…" commentary, no closing
+remarks. Every table must be COMPLETE: never an empty table, never a
+header row without data rows, never a domain left blank.`;
 
 /** Structural authority when the house templates are available. */
 function houseTemplateSection(tpl: string): string {
@@ -251,7 +254,9 @@ and Decision Log are all tables. Use the web_search tool to (re)verify
 every listing named in the conversation; every price dated; anything not
 read from a live page marked unverified; never invent listing data.
 2,000–3,000 words plus tables. Never defer a section to a later meeting or
-review — fill it with real, sourced content or an explicit Open Decision.`;
+review — fill it with real, sourced content or an explicit Open Decision.
+Output ONLY the document markdown, starting at the "# " title — no
+preamble, no commentary. Every table complete; no empty tables.`;
 
 export function buildBenchmarkSystem(brain = ""): string {
   return `${BENCH_AUTHOR}

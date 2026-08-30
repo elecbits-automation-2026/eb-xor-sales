@@ -877,10 +877,12 @@ async function storeDoc(
 }
 
 /**
- * Put the editable DOCX copy of a generated document into its deal's Drive
- * folder the moment it exists — the team works the doc in Drive while the
- * customer holds the PDF. Best-effort: any failure leaves delivery to the
- * finalize handoff (which skips kinds already delivered here).
+ * Put the editable copy of a generated document into its deal's Drive
+ * folder the moment it exists — as a NATIVE GOOGLE DOC (Drive converts the
+ * markdown server-side, so headings and tables render properly and the
+ * team edits in Docs; File → Download gives .docx whenever needed). The
+ * customer keeps the branded PDF in chat. Best-effort: any failure leaves
+ * delivery to the finalize handoff (which skips kinds delivered here).
  */
 async function fileDocxToDrive(
   s: SessionRow,
@@ -893,27 +895,27 @@ async function fileDocxToDrive(
   const folder = d.drive;
   if (cfg.mockDrive || !folder?.folder_id || folder.deal_id !== d.deal_id) return;
   try {
-    progress?.("filing the editable DOCX into the deal folder");
-    const { lldDocx } = await import("./lld-docx");
-    const buf = await lldDocx(md, {
-      leadRef: d.lead_ref ?? "XOR",
-      dealId: d.deal_id,
-      company: d.contact.company ?? null,
-    });
-    const { uploadOrUpdateDoc, DOCX_MIME } = await import("./drive");
+    progress?.("filing the editable doc into the deal folder");
+    const { uploadOrUpdateDoc, GOOGLE_DOC_MIME } = await import("./drive");
     const existing = kind === "lld" ? d.lld_drive_id : d.bench_drive_id;
-    const name = `${base}.docx`;
-    const id = await uploadOrUpdateDoc(folder.folder_id, existing ?? null, name, buf, DOCX_MIME);
+    const id = await uploadOrUpdateDoc(
+      folder.folder_id,
+      existing ?? null,
+      base,
+      Buffer.from(md, "utf-8"),
+      "text/markdown",
+      GOOGLE_DOC_MIME,
+    );
     if (kind === "lld") d.lld_drive_id = id;
     else d.bench_drive_id = id;
     await noteTask(
       s.id,
       "File to Drive",
       "completed",
-      `${name} → ${d.deal_id}${existing ? " (new version)" : ""}`,
+      `${base} → ${d.deal_id}${existing ? " (new version)" : ""}`,
     );
   } catch (err) {
-    console.error(`immediate ${kind} docx delivery failed session=${s.id}`, err);
+    console.error(`immediate ${kind} doc delivery failed session=${s.id}`, err);
     await noteTask(s.id, "File to Drive", "failed", "will deliver with the final handoff");
   }
 }
