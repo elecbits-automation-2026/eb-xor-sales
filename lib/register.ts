@@ -42,7 +42,7 @@ export interface IssueClientInput {
 export interface Register {
   /** Writes the Clients-tab row and returns the new EB-C-YY-nnnn. */
   issueClient(input: IssueClientInput): Promise<string>;
-  /** Writes the Deals-tab row (Status=Open) and returns the new EB-D-…-ss. */
+  /** Writes the Deals-tab row (Status=Open) and returns the new EB-C-…-Dss. */
   issueDeal(clientId: string, dealName: string): Promise<string>;
   /** Fills the Deals-tab Drive Folder Link column for an issued deal. */
   setDealFolderLink(dealId: string, url: string): Promise<void>;
@@ -172,7 +172,7 @@ class SheetsRegister implements Register {
   }
 
   async issueDeal(clientId: string, dealName: string): Promise<string> {
-    const dealPrefix = `${clientId.replace(/^EB-C-/, "EB-D-")}-`;
+    const dealPrefix = `${clientId}-D`;
     return this.issueWithRepair(
       "Deals",
       (ids) => {

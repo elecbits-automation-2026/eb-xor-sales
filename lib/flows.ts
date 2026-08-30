@@ -221,12 +221,12 @@ export function formatEbId(family: "C" | "D" | "P", yy: string, serial: number):
 }
 
 /**
- * The one identifier that embeds a reference (SOP §2.3): the client block is
- * lifted verbatim, with a per-client 2-digit deal sequence.
- * EB-C-26-0001 + 5 → EB-D-26-0001-05.
+ * The one identifier that embeds a reference (Eb-SOP v2.0): the client ID
+ * verbatim plus a per-client 2-digit deal sequence with the D marker.
+ * EB-C-26-0001 + 5 → EB-C-26-0001-D05.
  */
 export function dealIdFor(clientId: string, seq: number): string {
-  return `${clientId.replace(/^EB-C-/, "EB-D-")}-${String(seq).padStart(2, "0")}`;
+  return `${clientId}-D${String(seq).padStart(2, "0")}`;
 }
 
 export const CONTACT_FORM: FormField[] = [

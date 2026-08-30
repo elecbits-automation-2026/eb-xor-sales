@@ -227,7 +227,7 @@ export interface DriveResult {
  */
 /**
  * SOP layout (Law 5: folder = the ID alone): client folder EB-C-YY-nnnn in
- * the Sales container, deal folder EB-D-…-ss inside it — a LIGHT folder with
+ * the Sales container, deal folder EB-C-…-Dss inside it — a LIGHT folder with
  * no blueprint tree; the full project tree belongs to the project ULM opens
  * at sanction, never to the deal. Find-or-create throughout, so the early
  * (mid-chat) provisioning and the finalize handoff converge on ONE tree.
