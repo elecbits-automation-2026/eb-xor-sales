@@ -30,7 +30,8 @@ const SCOPES = [
 
 const FOLDER_MIME = "application/vnd.google-apps.folder";
 const GDOC_MIME = "application/vnd.google-apps.document";
-const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+export const DOCX_MIME =
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 // ── lazy singletons (never constructed at import time) ────────────────────
 function buildAuth() {
@@ -259,6 +260,34 @@ export async function provisionDealFolders(p: {
  * (skip-existing, so finalize replays stay idempotent). Returns the Drive
  * file id, or null when the object is missing/already delivered.
  */
+/**
+ * Create a document in a Drive folder, or push a NEW VERSION onto an
+ * existing one (same file id, Drive keeps version history) — how the living
+ * LLD/benchmark DOCX stays a single file through revisions. A stale id
+ * (file trashed/deleted by a human) falls back to a fresh create.
+ */
+export async function uploadOrUpdateDoc(
+  folderId: string,
+  existingFileId: string | null,
+  name: string,
+  bytes: Buffer,
+  mimeType: string,
+): Promise<string> {
+  if (existingFileId) {
+    try {
+      await drive().files.update({
+        fileId: existingFileId,
+        media: { mimeType, body: Readable.from(bytes) },
+        supportsAllDrives: true,
+      });
+      return existingFileId;
+    } catch (err) {
+      console.error(`doc version update failed (${name}) — creating fresh`, err);
+    }
+  }
+  return uploadBytes(folderId, name, bytes, mimeType);
+}
+
 export async function uploadStagedFile(
   folderId: string,
   name: string,
@@ -342,8 +371,10 @@ export async function driveHandoff(p: DriveHandoffPayload): Promise<DriveResult>
         p.lld.filename,
         bytes,
         p.lld.filename.endsWith(".docx")
-          ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-          : "text/markdown",
+          ? DOCX_MIME
+          : p.lld.filename.endsWith(".pdf")
+            ? "application/pdf"
+            : "text/markdown",
       );
     }
   }

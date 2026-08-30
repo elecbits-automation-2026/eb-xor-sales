@@ -203,6 +203,8 @@ export async function handle(inp: ChatIn, authUser?: AuthUser | null): Promise<C
         return await odmBenchReview(s, inp);
       case "ODM_LLD_REVIEW":
         return await odmLldReview(s, inp);
+      case "ODM_SANCTION":
+        return await odmSanction(s, inp);
       case "EMS_CHECKLIST":
         return await emsChecklist(s, inp, history);
       case "EMS_DETAILS":
@@ -286,6 +288,7 @@ async function goBack(s: SessionRow): Promise<ChatOut> {
       break;
     case "ODM_BENCH_REVIEW":
     case "ODM_LLD_REVIEW":
+    case "ODM_SANCTION":
       s.state = "ODM_REVIEW";
       break;
     case "ODM_REVIEW": {
@@ -806,15 +809,34 @@ const LLD_REVIEW_CHIPS = [
  * generation is best-effort: on any failure the markdown serves, never a
  * broken flow.
  */
-async function storeDoc(s: SessionRow, kind: "lld" | "bench", md: string): Promise<string> {
+async function storeDoc(
+  s: SessionRow,
+  kind: "lld" | "bench",
+  md: string,
+  progress?: (detail: string) => void,
+): Promise<string> {
   const db = getDb();
   const lead = s.data.lead_ref ?? "XOR";
-  const base = kind === "lld" ? `LLD-draft-${lead}` : `Product-Definition-${lead}`;
+  // Customer-facing filename: deal id + the product + what the document is
+  // ("EB-C-26-0004-D04 - 4G relay controller - LLD Draft.pdf"). Storage
+  // keys stay slugs — only the display/Drive name carries the words.
+  const product = (s.data.slots.product_concept ?? "")
+    .replace(/[\\/:*?"<>|#%&{}]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 40);
+  const docName = kind === "lld" ? "LLD Draft" : "Product Definition & Benchmark Report";
+  const base = [s.data.deal_id ?? lead, product, docName].filter(Boolean).join(" - ");
+  const slug = `${kind}-${lead}`;
   const docLabel =
     kind === "lld" ? "LLD Draft v0.1" : "Product Definition & Benchmark Report v0.1";
   const mdName = `${base}.md`;
-  const mdPath = `${s.id}/generated/${mdName}`;
+  const mdPath = `${s.id}/generated/${slug}.md`;
   await db.putObject(mdPath, new TextEncoder().encode(md), "text/markdown");
+  // The deal folder already exists (created when the ID was issued) — file
+  // the EDITABLE DOCX copy there right now; the chat's deliverable stays
+  // the branded PDF. Revisions version the same Drive file.
+  await fileDocxToDrive(s, kind, md, base, progress);
   const set = (file: string, path: string) => {
     if (kind === "lld") {
       s.data.lld_file = file;
@@ -835,7 +857,7 @@ async function storeDoc(s: SessionRow, kind: "lld" | "bench", md: string): Promi
       company: s.data.contact.company ?? null,
     });
     const pdfName = `${base}.pdf`;
-    const pdfPath = `${s.id}/generated/${pdfName}`;
+    const pdfPath = `${s.id}/generated/${slug}.pdf`;
     await db.putObject(pdfPath, new Uint8Array(buf), "application/pdf");
     set(pdfName, pdfPath);
     return pdfName;
@@ -854,6 +876,48 @@ async function storeDoc(s: SessionRow, kind: "lld" | "bench", md: string): Promi
   }
 }
 
+/**
+ * Put the editable DOCX copy of a generated document into its deal's Drive
+ * folder the moment it exists — the team works the doc in Drive while the
+ * customer holds the PDF. Best-effort: any failure leaves delivery to the
+ * finalize handoff (which skips kinds already delivered here).
+ */
+async function fileDocxToDrive(
+  s: SessionRow,
+  kind: "lld" | "bench",
+  md: string,
+  base: string,
+  progress?: (detail: string) => void,
+): Promise<void> {
+  const d = s.data;
+  const folder = d.drive;
+  if (cfg.mockDrive || !folder?.folder_id || folder.deal_id !== d.deal_id) return;
+  try {
+    progress?.("filing the editable DOCX into the deal folder");
+    const { lldDocx } = await import("./lld-docx");
+    const buf = await lldDocx(md, {
+      leadRef: d.lead_ref ?? "XOR",
+      dealId: d.deal_id,
+      company: d.contact.company ?? null,
+    });
+    const { uploadOrUpdateDoc, DOCX_MIME } = await import("./drive");
+    const existing = kind === "lld" ? d.lld_drive_id : d.bench_drive_id;
+    const name = `${base}.docx`;
+    const id = await uploadOrUpdateDoc(folder.folder_id, existing ?? null, name, buf, DOCX_MIME);
+    if (kind === "lld") d.lld_drive_id = id;
+    else d.bench_drive_id = id;
+    await noteTask(
+      s.id,
+      "File to Drive",
+      "completed",
+      `${name} → ${d.deal_id}${existing ? " (new version)" : ""}`,
+    );
+  } catch (err) {
+    console.error(`immediate ${kind} docx delivery failed session=${s.id}`, err);
+    await noteTask(s.id, "File to Drive", "failed", "will deliver with the final handoff");
+  }
+}
+
 /** Iterative benchmark-report editing (Outcome A): revise, then LLD or file. */
 async function odmBenchReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
   const db = getDb();
@@ -868,7 +932,27 @@ async function odmBenchReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
       [chips(reviewChips().filter((c) => c.id !== "bench:generate"))],
     );
   }
-  if (inp.kind === "chip" && inp.chip_id === "bench:file") return finalize(s);
+  if (inp.kind === "chip" && inp.chip_id === "bench:file") return askSanction(s);
+  // Text can be a REVISION ("make the price band tighter") — but it can just
+  // as well be the customer driving the flow forward. Route intent first:
+  // "ok now create the lld" must START THE LLD, not rewrite the report.
+  if (inp.kind === "text" && inp.text) {
+    const t = inp.text;
+    const wantsLld =
+      /\blld\b|low.?level design/i.test(t) &&
+      /\b(create|generate|make|draft|start|proceed|continue|move|next|go|now|chalo|banao)\b/i.test(t) &&
+      !/\b(in the report|to the report|in the bench)\b/i.test(t);
+    if (wantsLld) {
+      s.state = "ODM_REVIEW";
+      return odmReview(s, { session_id: s.id, kind: "chip", chip_id: "lld:generate" });
+    }
+    if (/^\s*(ok(ay)?[\s,.!]*)*(lock(ed)?( it)?|looks (good|right)|perfect|approved?|theek( hai)?|sahi hai)\b/i.test(t)) {
+      return odmBenchReview(s, { session_id: s.id, kind: "chip", chip_id: "bench:accept" });
+    }
+    if (/\b(file (it|this|as is)|submit|final(ise|ize)?d?)\b/i.test(t)) {
+      return askSanction(s);
+    }
+  }
   const feedback =
     inp.kind === "text" && inp.text
       ? inp.text
@@ -895,7 +979,7 @@ async function odmBenchReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
             progress,
           );
           progress("rendering the branded PDF");
-          return storeDoc(s, "bench", benchMd);
+          return storeDoc(s, "bench", benchMd, progress);
         },
         { detail: (f) => f, failDetail: "revision failed — current report untouched" },
       );
@@ -927,7 +1011,17 @@ async function odmBenchReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
 /** Iterative LLD editing: revise on feedback, file on approval. */
 async function odmLldReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
   const db = getDb();
-  if (inp.kind === "chip" && inp.chip_id === "lld:accept") return finalize(s);
+  if (inp.kind === "chip" && inp.chip_id === "lld:accept") return askSanction(s);
+  // "file it" / "looks good" in words is an ACCEPT, not a revision request.
+  if (
+    inp.kind === "text" &&
+    inp.text &&
+    /^\s*(ok(ay)?[\s,.!]*)*(file( it| this| as is)?|submit|final(ise|ize)?d?|accept(ed)?|looks (good|right)|approved?|lock it|perfect|theek( hai)?|sahi hai)\b/i.test(
+      inp.text,
+    )
+  ) {
+    return askSanction(s);
+  }
   const feedback =
     inp.kind === "text" && inp.text
       ? inp.text
@@ -954,7 +1048,7 @@ async function odmLldReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
             progress,
           );
           progress("rendering the branded PDF");
-          return storeDoc(s, "lld", lldMd);
+          return storeDoc(s, "lld", lldMd, progress);
         },
         { detail: (f) => f, failDetail: "revision failed — current draft untouched" },
       );
@@ -983,6 +1077,44 @@ async function odmLldReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
   return resume(s);
 }
 
+const SANCTION_CHIPS = [
+  { id: "sanction:yes", label: "Yes — apply for project sanction" },
+  { id: "sanction:no", label: "Not yet — just file it" },
+];
+
+/** The closing question of EVERY ODM filing: apply for project sanction?
+ *  Only a sanctioned project gets built (and only then is an engineering
+ *  call scheduled) — so the application is the natural last step. */
+async function askSanction(s: SessionRow): Promise<ChatOut> {
+  s.state = "ODM_SANCTION";
+  return out(
+    s,
+    [
+      "One last thing — should I apply for project sanction with this? " +
+        "Sanction is what moves it from a definition to a scheduled build.",
+    ],
+    [chips(SANCTION_CHIPS)],
+  );
+}
+
+async function odmSanction(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
+  const yes =
+    (inp.kind === "chip" && inp.chip_id === "sanction:yes") ||
+    (inp.kind === "text" &&
+      !!inp.text &&
+      /^\s*(yes|yeah|yep|ya|sure|haan?|ji|ok(ay)?|theek|bilkul|go ahead|apply|proceed|chalo)\b/i.test(
+        inp.text,
+      ));
+  const no =
+    (inp.kind === "chip" && inp.chip_id === "sanction:no") ||
+    (inp.kind === "text" && !!inp.text && /^\s*(no|nah|nahi|not (yet|now)|later|abhi nahi)\b/i.test(inp.text));
+  if (yes || no) {
+    s.data.sanction_requested = yes;
+    return finalize(s);
+  }
+  return resume(s); // anything else: re-present the question
+}
+
 async function odmReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
   const db = getDb();
   if (inp.kind === "chip") {
@@ -1006,7 +1138,7 @@ async function odmReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
               progress,
             );
             progress("rendering the branded PDF");
-            return storeDoc(s, "bench", benchMd);
+            return storeDoc(s, "bench", benchMd, progress);
           },
           { detail: (f) => f, failDetail: "generation failed — hit the chip to retry" },
         );
@@ -1059,7 +1191,7 @@ async function odmReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
               progress,
             );
             progress("rendering the branded PDF");
-            return storeDoc(s, "lld", lldMd);
+            return storeDoc(s, "lld", lldMd, progress);
           },
           { detail: (f) => f, failDetail: "generation failed — hit the chip to retry" },
         );
@@ -1094,7 +1226,7 @@ async function odmReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
       );
     }
     if (inp.chip_id === "lld:skip") {
-      return finalize(s);
+      return askSanction(s);
     }
     if (inp.chip_id === "lld:edit") {
       const opts = ODM_SLOTS.map(([k]) => ({ id: `edit:${k}`, label: ODM_SLOT_LABELS[k] }));
@@ -1387,8 +1519,9 @@ async function finalizeWork(s: SessionRow): Promise<ChatOut> {
       storage_path: f.storage_path,
       filename: `${stamp} ${item_key}--${f.filename}`,
     }));
-  // Outcome A's report travels to the deal folder alongside everything else.
-  if (d.bench_path && d.bench_file) {
+  // Outcome A's report travels to the deal folder alongside everything else
+  // — unless its editable DOCX already lives there from generation time.
+  if (d.bench_path && d.bench_file && !d.bench_drive_id) {
     files.push({ storage_path: d.bench_path, filename: `${stamp} ${d.bench_file}` });
   }
 
@@ -1401,7 +1534,7 @@ async function finalizeWork(s: SessionRow): Promise<ChatOut> {
     files,
     summary_md: summaryMd,
     lld:
-      d.lld_path && d.lld_file
+      d.lld_path && d.lld_file && !d.lld_drive_id
         ? { filename: `${stamp} ${d.lld_file}`, storage_path: d.lld_path }
         : null,
     stamp,
@@ -1493,7 +1626,10 @@ async function finalizeWork(s: SessionRow): Promise<ChatOut> {
   d.finalized = true;
   const first = (c.name ?? "").split(/\s+/)[0] ?? "";
   const trackLines: Record<string, string> = {
-    ODM: "your requirement and documents go in for project sanction — once the project is sanctioned, the build is scheduled",
+    ODM:
+      d.sanction_requested === false
+        ? "your requirement and documents are filed — say the word here whenever you want to apply for project sanction"
+        : "your sanction application goes in with the requirement and documents — once the project is sanctioned, the build is scheduled",
     EMS: "the team will review your build package and come back with clarifications and a quote plan",
     PRODUCT: "the team will share the matching catalogue and pricing",
   };
@@ -1588,6 +1724,12 @@ function intakeSummary(s: SessionRow): string {
       if (k in d.slots) lines.push(`- **${ODM_SLOT_LABELS[k]}:** ${d.slots[k]}`);
     }
     if (d.lld_file) lines.push("", `LLD draft generated: \`${d.lld_file}\``);
+    if (d.sanction_requested != null) {
+      lines.push(
+        "",
+        `**Project sanction:** ${d.sanction_requested ? "APPLIED — customer asked to take this to sanction" : "not yet — customer will apply later"}`,
+      );
+    }
   } else if (s.track === "EMS") {
     lines.push("## Build package");
     for (const item of EMS_CHECKLIST) {
@@ -1649,6 +1791,8 @@ function resumeWidget(s: SessionRow): Widget | null {
       return chips(BENCH_REVIEW_CHIPS);
     case "ODM_LLD_REVIEW":
       return chips(LLD_REVIEW_CHIPS);
+    case "ODM_SANCTION":
+      return chips(SANCTION_CHIPS);
     case "DONE":
       return chips([{ id: "restart", label: "Start another enquiry" }]);
     default:
@@ -1668,6 +1812,8 @@ async function resume(s: SessionRow): Promise<ChatOut> {
     ODM_BENCH_REVIEW:
       "Your Product Definition & Benchmark Report is ready — tell me what to change, or lock it.",
     ODM_LLD_REVIEW: "Your LLD draft is ready — tell me what to change, or file it as is.",
+    ODM_SANCTION:
+      "One question left — should I apply for project sanction with this?",
     EMS_CHECKLIST: "Whenever you're ready with the next file.",
     EMS_DETAILS: "Just the build details left.",
     PRODUCT_CATEGORY: "Pick the closest category.",
