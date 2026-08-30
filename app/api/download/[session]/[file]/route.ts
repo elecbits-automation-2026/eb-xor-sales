@@ -26,9 +26,12 @@ export async function GET(
   const bytes = await db.getObject(s.data.lld_path);
   if (!bytes) return NextResponse.json({ detail: "not found" }, { status: 404 });
 
+  const type = safe.endsWith(".docx")
+    ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    : "text/markdown; charset=utf-8";
   return new NextResponse(Buffer.from(bytes), {
     headers: {
-      "content-type": "text/markdown; charset=utf-8",
+      "content-type": type,
       "content-disposition": `attachment; filename="${safe}"`,
     },
   });

@@ -72,6 +72,7 @@ const STATE_LABELS: Record<SessionState, string> = {
   CLIENT_ORGSIZE: "about your company",
   ODM_SLOTS: "requirement capture",
   ODM_REVIEW: "review",
+  ODM_LLD_REVIEW: "refining your LLD",
   EMS_CHECKLIST: "build package",
   EMS_DETAILS: "build details",
   PRODUCT_CATEGORY: "product enquiry",

@@ -14,6 +14,7 @@ export type SessionState =
   | "CLIENT_ORGSIZE"
   | "ODM_SLOTS"
   | "ODM_REVIEW"
+  | "ODM_LLD_REVIEW"
   | "EMS_CHECKLIST"
   | "EMS_DETAILS"
   | "PRODUCT_CATEGORY"
@@ -110,8 +111,10 @@ export interface SessionData {
   auth_email: string | null; // verified email of that login
   auth_name?: string | null; // display name of that login
   sales_agent?: string | null; // Elecbits contact chosen at signup
-  lld_file: string | null; // filename served for download
-  lld_path: string | null; // storage path of the generated LLD
+  lld_file: string | null; // filename served for download (branded .docx)
+  lld_path: string | null; // storage path of the generated LLD deliverable
+  /** Storage path of the markdown source — revisions rewrite from this. */
+  lld_md_path?: string | null;
   drive: { folder_id?: string; folder_url?: string };
   finalized: boolean;
 }

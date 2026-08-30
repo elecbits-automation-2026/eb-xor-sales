@@ -58,23 +58,69 @@ function systemBlocks(stable: string, volatile = ""): Anthropic.TextBlockParam[]
   return blocks;
 }
 
-/** One Claude call that must answer via the given tool; returns its input. */
+/**
+ * Server-side web search (runs on Anthropic's infra inside the same request
+ * — no client loop, no keys). Lets the bot pull REAL product benchmarks and
+ * standards when a customer says "look at the top 5 on Amazon".
+ */
+function webSearchTool(maxUses: number): Anthropic.Tool {
+  return {
+    type: "web_search_20260209",
+    name: "web_search",
+    max_uses: maxUses,
+  } as unknown as Anthropic.Tool;
+}
+
+/** Continue a response the server paused mid-search (stop_reason pause_turn). */
+async function createResuming(
+  params: Omit<Anthropic.MessageCreateParamsNonStreaming, "messages">,
+  messages: Anthropic.MessageParam[],
+): Promise<Anthropic.Message> {
+  let msgs = messages;
+  let resp = await getClient().messages.create({ ...params, messages: msgs });
+  for (let i = 0; i < 3 && resp.stop_reason === "pause_turn"; i++) {
+    msgs = [...msgs, { role: "assistant", content: resp.content }];
+    resp = await getClient().messages.create({ ...params, messages: msgs });
+  }
+  return resp;
+}
+
+/**
+ * One Claude call that must answer via the given tool; returns its input.
+ * With webSearch enabled the tool choice relaxes to auto so the model may
+ * search FIRST — a nudge turn guarantees the recording tool still gets
+ * called before we give up.
+ */
 async function callTool(
   stableSystem: string,
   messages: Anthropic.MessageParam[],
   tool: Anthropic.Tool,
   volatileSystem = "",
+  webSearch = false,
 ): Promise<Record<string, unknown>> {
-  const resp = await getClient().messages.create({
-    model: cfg.model,
-    max_tokens: 1024,
-    system: systemBlocks(stableSystem, volatileSystem),
-    messages,
-    tools: [tool],
-    tool_choice: { type: "tool", name: tool.name },
-  });
-  for (const block of resp.content) {
-    if (block.type === "tool_use") return block.input as Record<string, unknown>;
+  let msgs = messages;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const resp = await createResuming(
+      {
+        model: cfg.model,
+        max_tokens: webSearch ? 4096 : 1024,
+        system: systemBlocks(stableSystem, volatileSystem),
+        tools: webSearch ? [webSearchTool(3), tool] : [tool],
+        tool_choice: webSearch ? { type: "auto" } : { type: "tool", name: tool.name },
+      },
+      msgs,
+    );
+    for (const block of resp.content) {
+      if (block.type === "tool_use" && block.name === tool.name) {
+        return block.input as Record<string, unknown>;
+      }
+    }
+    if (!webSearch) break; // forced choice — a retry can't change anything
+    msgs = [
+      ...msgs,
+      { role: "assistant", content: resp.content },
+      { role: "user", content: `Now record this turn by calling ${tool.name} exactly once.` },
+    ];
   }
   throw new Error("model returned no tool_use block");
 }
@@ -175,6 +221,8 @@ export async function extractSlots(
       buildSlotsSystem(brain),
       [{ role: "user", content: context }],
       TOOL_SLOTS,
+      "",
+      true, // web search: real benchmarks when the customer references products
     );
     const raw =
       out.updates && typeof out.updates === "object"
@@ -212,12 +260,15 @@ export async function answerQuestion(history_: Msg[], userText: string): Promise
   try {
     const chunks = await retrieveContext(userText);
     const brain = await brainContext(); // never throws — cached text or ""
-    const resp = await getClient().messages.create({
-      model: cfg.model,
-      max_tokens: 400,
-      system: systemBlocks(buildQaStable(chunks.length > 0, brain), qaExcerpts(chunks)),
-      messages: history(history_, userText),
-    });
+    const resp = await createResuming(
+      {
+        model: cfg.model,
+        max_tokens: 1024,
+        system: systemBlocks(buildQaStable(chunks.length > 0, brain), qaExcerpts(chunks)),
+        tools: [webSearchTool(3)],
+      },
+      history(history_, userText),
+    );
     return joinText(resp.content);
   } catch (err) {
     console.error("qa failed:", err);
@@ -234,6 +285,7 @@ export async function generateLld(
   contact: Record<string, string>,
   leadRef: string,
   recent: Msg[] = [],
+  revision?: { prior: string; feedback: string },
 ): Promise<string> {
   if (cfg.mockLlm) return templateLld(slots, contact, leadRef);
   const brief = Object.entries(slots)
@@ -252,21 +304,28 @@ export async function generateLld(
     // pgvector KB — reference designs, SOP sections, past LLD patterns.
     const query = [slots.product_concept, slots.key_features].filter(Boolean).join(" — ");
     const chunks = query ? await retrieveContext(query) : [];
-    const resp = await getClient().messages.create({
-      model: cfg.model,
-      max_tokens: 3000,
-      system: systemBlocks(buildLldSystem(brain), kbBackground(chunks.slice(0, 6))),
-      messages: [
+    const resp = await createResuming(
+      {
+        model: cfg.model,
+        max_tokens: 3000,
+        system: systemBlocks(buildLldSystem(brain), kbBackground(chunks.slice(0, 6))),
+        tools: [webSearchTool(5)], // pull real benchmark specs when refs are missing
+      },
+      [
         {
           role: "user",
           content:
             `Intake ref ${leadRef} for ${contact["company"] ?? "the customer"}.\n` +
             `Intake answers:\n${brief}\n\n` +
             (convo ? `Conversation transcript:\n${convo}\n\n` : "") +
-            `Write the LLD draft.`,
+            (revision
+              ? `Previous draft:\n${revision.prior.slice(0, 12000)}\n\n` +
+                `The customer reviewed it and asks:\n${revision.feedback}\n\n` +
+                `Rewrite the COMPLETE LLD applying the requested changes (all ten sections).`
+              : `Write the LLD draft.`),
         },
       ],
-    });
+    );
     const text = joinText(resp.content);
     return text || templateLld(slots, contact, leadRef);
   } catch (err) {
