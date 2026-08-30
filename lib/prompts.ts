@@ -75,8 +75,15 @@ for that slot. Never invent or force a value. In that case the
 acknowledgement must be a friendly, specific re-ask in your own words
 (one short sentence, referencing what they said if it helps).
 
-When you DID capture the value, write a short acknowledgement (<=20 words,
-no question).
+When you DID capture the value, the acknowledgement is a CONSULTANT'S
+REPLY, not a receipt. React to what they actually said the way a senior
+hardware engineer across the table would: an implication, a trade-off, a
+sanity check against industry norms, a flag on something aggressive or
+unusual — grounded in the company knowledge when it applies. Match their
+depth: a one-word answer earns one crisp sentence; a real problem statement
+earns two or three substantive ones. No filler ("Great!", "Thanks for
+sharing"), no question inside the acknowledgement — the question comes
+separately in next_question.
 
 next_question: the context lists the remaining slots in order. After
 applying your updates, take the FIRST slot still unfilled and write ONE
@@ -85,6 +92,19 @@ conversation, the way a senior hardware consultant would ask (reference
 their answers, industry norms, certifications, realistic ranges). Never a
 generic form question. Omit it when no slots remain or when your ack is
 already a re-ask.
+
+Strategy rules for next_question:
+- If the product concept itself is TBD/unknown, do NOT ask for
+  component-level specs of an undefined product. Pivot to DISCOVERY: what
+  their business does, the problem they want solved, who will use it, what
+  prompted the enquiry. Map whatever they reveal into the slots as it
+  emerges — discovery answers often fill several at once.
+- Never repeat a question you already asked with the same phrasing (the
+  recent conversation is provided) — each re-approach must take a fresh
+  angle: an example, a category choice, a problem framing.
+- Once two or more slots sit at TBD, weave in a light exit: they can say
+  "connect me to sales" any time and an engineer picks it up on a call —
+  then continue with your question.
 
 Respond by calling fill_slots exactly once.`;
 
@@ -100,7 +120,8 @@ export const TOOL_SLOTS: Anthropic.Tool = {
       },
       ack: {
         type: "string",
-        description: "Short acknowledgement, no question.",
+        description:
+          "Consultant's reply to what they said (1-3 substantive sentences; no question).",
       },
       next_question: {
         type: "string",
@@ -131,10 +152,12 @@ apply — this draft should read like an Elecbits document.`;
 
 // ── General Q&A (QUESTION classification) ────────────────────────────────
 export const SYSTEM_QA = `You are XOR Assist on the Elecbits website. Answer the visitor's
-question using ONLY the knowledge below. Under 80 words, no prices, no firm
-timelines, no invented facts — if the answer isn't in the knowledge, say the
-sales engineering team will cover it on the call. End with one short line
-inviting them to share what they're building.
+question using ONLY the knowledge below — properly: a real, useful answer
+the way a senior engineer would give it (typically 60–150 words; use
+structure if it helps). No prices, no firm timelines, no invented facts —
+if the answer isn't in the knowledge, say the sales engineering team will
+cover it on the call. End with one short line inviting them to share what
+they're building.
 
 ${COMPANY_SNAPSHOT}`;
 
@@ -161,8 +184,9 @@ export function buildQaSystem(chunks: KbMatch[], brain = ""): string {
     .map((c) => `[from: ${c.document_name}]\n${c.content}`)
     .join("\n\n");
   return `You are XOR Assist on the Elecbits website. Answer the visitor's
-question using ONLY the knowledge-base excerpts below. Under 80 words, no
-prices, no firm timelines, no invented facts. Cite the document names you
+question using ONLY the knowledge-base excerpts below — properly: a real,
+useful answer (typically 60–150 words), not a brush-off. No prices, no firm
+timelines, no invented facts. Cite the document names you
 used inline, like "(from: <document name>)". If the answer isn't in the
 excerpts, say the sales engineering team will cover it on the call. End with
 one short line inviting them to share what they're building.${brainSection(brain)}

@@ -171,7 +171,7 @@ export async function handle(inp: ChatIn, authUser?: AuthUser | null): Promise<C
       case "CLIENT_ORGSIZE":
         return await clientOrgsize(s, inp);
       case "ODM_SLOTS":
-        return await odmSlots(s, inp);
+        return await odmSlots(s, inp, history);
       case "ODM_REVIEW":
         return await odmReview(s, inp);
       case "EMS_CHECKLIST":
@@ -633,13 +633,19 @@ async function startTrackFlow(s: SessionRow, first: string, prefix = ""): Promis
   return out(s, [`${prefix}Thanks ${first}. Which category fits best?`], [chips(opts)]);
 }
 
-async function odmSlots(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
+async function odmSlots(s: SessionRow, inp: ChatIn, history: Msg[] = []): Promise<ChatOut> {
   if (inp.kind !== "text" || !inp.text) return resume(s);
   const remaining = ODM_SLOTS.filter(([k]) => !(k in s.data.slots)).map(([k]) => ({
     key: k,
     label: ODM_SLOT_LABELS[k] ?? k,
   }));
-  const ext = await llm.extractSlots(s.data.slots, s.data.expected_slot, inp.text, remaining);
+  const ext = await llm.extractSlots(
+    s.data.slots,
+    s.data.expected_slot,
+    inp.text,
+    remaining,
+    history,
+  );
   Object.assign(s.data.slots, ext.updates ?? {});
 
   // The asked slot didn't get answered (gibberish / off-topic / test)?
@@ -661,9 +667,14 @@ async function odmSlots(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
   if (nxt) {
     const [key, q, hint] = nxt;
     s.data.expected_slot = key;
-    let msg = `${ext.ack || "Noted."} ${q}`;
-    if (hint) msg += ` (${hint})`;
-    return out(s, [msg]);
+    // Claude's authored question (grounded, conversational, discovery-aware)
+    // leads; the flow template is only the fallback when it gave none.
+    let question = ext.nextQuestion?.trim() ?? "";
+    if (!question) {
+      question = q;
+      if (hint) question += ` (${hint})`;
+    }
+    return out(s, [`${ext.ack || "Noted."} ${question}`]);
   }
   s.data.expected_slot = null;
   s.state = "ODM_REVIEW";

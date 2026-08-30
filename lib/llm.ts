@@ -137,6 +137,7 @@ export async function extractSlots(
   expectedSlot: string | null,
   userText: string,
   remainingSlots: { key: string; label: string }[] = [],
+  recent: Msg[] = [],
 ): Promise<{ updates: Record<string, string>; ack: string; nextQuestion?: string }> {
   if (cfg.mockLlm) {
     const updates: Record<string, string> = expectedSlot
@@ -145,12 +146,19 @@ export async function extractSlots(
     return { updates, ack: "Got it." };
   }
   const schemaDesc = JSON.stringify(ODM_SLOT_LABELS, null, 1);
+  // The tail of the dialogue, so re-asks vary and questions can reference
+  // what was actually said (kept short — the brain dominates the prompt).
+  const convo = recent
+    .slice(-8)
+    .map((m) => `${m.role === "user" ? "Customer" : "You"}: ${m.content.slice(0, 240)}`)
+    .join("\n");
   const context =
     `Slot schema (key -> label):\n${schemaDesc}\n\n` +
     `Values so far: ${JSON.stringify(slotsSoFar)}\n` +
     `The last question asked about slot: ${expectedSlot}\n` +
     `Remaining slots, in order (next_question targets the first one your ` +
     `updates leave unfilled): ${JSON.stringify(remainingSlots)}\n\n` +
+    (convo ? `Recent conversation:\n${convo}\n\n` : "") +
     `Customer message: ${userText}`;
   try {
     const brain = await brainContext(); // never throws — cached text or ""
