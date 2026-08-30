@@ -21,6 +21,7 @@
   --purple: #7c3aed;
   --coral: #ea580c;
   --mono: var(--font-mono), "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --chat-col: 960px;
   --page-glow:
     radial-gradient(1100px 560px at 88% -10%, rgba(37, 99, 235, 0.05), transparent 60%),
     radial-gradient(900px 520px at -12% 110%, rgba(124, 58, 237, 0.04), transparent 60%);
@@ -185,7 +186,7 @@ button {
   gap: 9px;
   box-sizing: border-box;
   width: 100%;
-  max-width: 780px;
+  max-width: var(--chat-col);
   height: 52px;
   margin: 0 auto;
   padding: 0 24px;
@@ -227,7 +228,7 @@ button {
   color: var(--acc);
 }
 /* once the column meets the pane edge, clear the fixed theme toggle */
-@media (max-width: 1180px) {
+@media (max-width: 1360px) {
   .chat-top-inner {
     padding-right: 60px;
   }
@@ -244,7 +245,7 @@ button {
 .log-col {
   box-sizing: border-box;
   width: 100%;
-  max-width: 780px;
+  max-width: var(--chat-col);
   margin: 0 auto;
   padding: 0 24px;
 }
@@ -582,7 +583,7 @@ button {
 .composer-col {
   box-sizing: border-box;
   width: 100%;
-  max-width: 780px;
+  max-width: var(--chat-col);
   margin: 0 auto;
   padding: 0 24px;
   pointer-events: auto;
