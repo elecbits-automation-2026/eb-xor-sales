@@ -74,7 +74,9 @@ Clients can sign up / sign in and see **their enquiries** at `/account`
 1. Run [`supabase/migrations/0002_clients.sql`](supabase/migrations/0002_clients.sql)
    (clients table + the PMS-consistent ID counters), then
    [`supabase/migrations/0003_tasks.sql`](supabase/migrations/0003_tasks.sql)
-   (the per-session "Background tasks" activity feed shown on the chat page).
+   (the per-session "Background tasks" activity feed shown on the chat page),
+   then [`supabase/migrations/0004_settings.sql`](supabase/migrations/0004_settings.sql)
+   (the settings store that caches the auto-discovered Google bindings).
 2. Supabase Dashboard → Authentication → Providers → enable **Email**, and
    keep **Confirm email ON** — unconfirmed signups must never unlock an
    enquiry list. Set Site URL (Authentication → URL Configuration) to your
@@ -136,11 +138,20 @@ converted by the PM/ULM per the setup SOP.
    that user's entire Drive. Keep the key only in Vercel (Sensitive),
    rotate it if it ever leaks, and prefer a dedicated user over a
    personal one.
-4. Create the `XOR Intake` tab on the funnel sheet; grab the spreadsheet ID
-   from its URL (`/spreadsheets/d/<ID>/edit`). The bot writes the header row
-   if the tab is empty.
-5. Verify all folder IDs before wiring them — the Drive migration plan moves
-   folders.
+4. **Zero-config discovery — no IDs needed.** With the key in place the bot
+   finds its own anchors among whatever it can see, caches the binding in
+   the db, and reports it on `/api/health`:
+   - **register**: the newest native Google Sheet named like
+     `Eb-Master_Register` (validated for the `Clients`/`Deals` tabs). An
+     `.xlsx` copy is rejected with a "File → Save as Google Sheets"
+     instruction — the Sheets API cannot write into Excel files.
+   - **accounts folder**: `Eb-07-Sales`, created inside `Eb-Central-ULM`
+     when missing.
+   - **funnel**: `XOR-Sales-Funnel`, created (with the `XOR Intake` tab)
+     when missing; the bot writes the header row itself.
+   `MASTER_REGISTER_SPREADSHEET_ID` / `ACCOUNTS_PARENT_FOLDER_ID` /
+   `FUNNEL_SPREADSHEET_ID` remain as optional pins and always win over
+   discovery — use one if `/api/health` shows the wrong binding.
 
 ### 3 · Vercel (½ day)
 

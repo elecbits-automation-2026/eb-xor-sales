@@ -5,10 +5,10 @@
  */
 import { FUNNEL_COLUMNS, cfg } from "@/lib/config";
 import { sheets } from "@/lib/drive";
+import { resolveFunnel } from "@/lib/gtargets";
 
 export async function appendFunnelRow(row: (string | number)[]): Promise<void> {
-  const spreadsheetId = cfg.funnelSpreadsheetId;
-  if (!spreadsheetId) throw new Error("FUNNEL_SPREADSHEET_ID is not set");
+  const spreadsheetId = (await resolveFunnel()).id;
   const tab = cfg.funnelSheetTab;
 
   const api = sheets();
