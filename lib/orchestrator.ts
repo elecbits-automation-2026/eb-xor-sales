@@ -612,7 +612,10 @@ async function establishAccount(s: SessionRow): Promise<string> {
     }
     if (cfg.mockDrive) {
       await noteTask(s.id, "Create Drive workspace", "completed", "demo mode — logged, not sent");
-    } else if (!d.drive) {
+    } else if (!d.drive.folder_id || d.drive.deal_id !== d.deal_id) {
+      // NB: the guard is on folder_id + deal match — `!d.drive` alone is
+      // always false (blank sessions carry {}), which silently killed this
+      // whole branch for a day. The folder belongs to THIS deal.
       const res = await trackTask(
         s.id,
         "Create Drive workspace",
@@ -626,7 +629,7 @@ async function establishAccount(s: SessionRow): Promise<string> {
         },
         { detail: () => d.deal_id ?? null, failDetail: "will be created with the handoff" },
       );
-      d.drive = { folder_id: res.folder_id, folder_url: res.folder_url };
+      d.drive = { folder_id: res.folder_id, folder_url: res.folder_url, deal_id: d.deal_id! };
       if (res.client_folder_id !== client.drive_folder_id) {
         await getDb().updateClient(client.id, {
           drive_folder_id: res.client_folder_id,
@@ -1328,7 +1331,7 @@ async function finalizeWork(s: SessionRow): Promise<ChatOut> {
         },
         { detail: () => d.deal_id ?? null, failDetail: "queued for automatic retry" },
       );
-      d.drive = { folder_id: res.folder_id, folder_url: res.folder_url };
+      d.drive = { folder_id: res.folder_id, folder_url: res.folder_url, deal_id: d.deal_id ?? undefined };
       await db.updateLead(leadId, {
         drive_folder_id: res.folder_id,
         drive_folder_url: res.folder_url,

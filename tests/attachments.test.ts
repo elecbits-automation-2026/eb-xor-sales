@@ -177,10 +177,13 @@ describe("attachment roundtrip", () => {
   it("mid-checklist: keeps EMS un-advanced and delivers straight to Drive", async () => {
     const sid = await reachEmsChecklist();
 
-    // Deal folder already provisioned → immediate delivery path.
+    // Deal folder already provisioned → immediate delivery path. The ref
+    // must be stamped with the CURRENT deal — an unstamped/stale folder is
+    // ignored (it belongs to a previous deal in the same session).
     const db = getDb();
     const s = await db.getSession(sid);
-    s!.data.drive = { folder_id: "deal-folder-1" };
+    expect(s!.data.deal_id).toBeTruthy();
+    s!.data.drive = { folder_id: "deal-folder-1", deal_id: s!.data.deal_id! };
     await db.saveSession(s!);
     process.env.MOCK_DRIVE = "false";
 
