@@ -849,14 +849,21 @@ async function odmBenchReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
     const prior = mdPath ? await db.getObject(mdPath) : null;
     const priorMd = prior ? new TextDecoder().decode(prior) : "";
     const transcript = await db.recentMessages(s.id, 60);
-    const benchMd = await llm.generateBenchmark(
-      s.data.slots,
-      s.data.contact,
-      s.data.lead_ref ?? "XOR",
-      transcript,
-      { prior: priorMd, feedback },
+    const fname = await trackTask(
+      s.id,
+      "Revise the benchmark report",
+      async () => {
+        const benchMd = await llm.generateBenchmark(
+          s.data.slots,
+          s.data.contact,
+          s.data.lead_ref ?? "XOR",
+          transcript,
+          { prior: priorMd, feedback },
+        );
+        return storeDoc(s, "bench", benchMd);
+      },
+      { detail: (f) => f },
     );
-    const fname = await storeDoc(s, "bench", benchMd);
     return out(
       s,
       ["Rewritten with your changes. Another pass, or lock it and move to the LLD?"],
@@ -886,14 +893,21 @@ async function odmLldReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
     const prior = mdPath ? await db.getObject(mdPath) : null;
     const priorMd = prior ? new TextDecoder().decode(prior) : "";
     const transcript = await db.recentMessages(s.id, 40);
-    const lldMd = await llm.generateLld(
-      s.data.slots,
-      s.data.contact,
-      s.data.lead_ref ?? "XOR",
-      transcript,
-      { prior: priorMd, feedback },
+    const fname = await trackTask(
+      s.id,
+      "Revise the LLD",
+      async () => {
+        const lldMd = await llm.generateLld(
+          s.data.slots,
+          s.data.contact,
+          s.data.lead_ref ?? "XOR",
+          transcript,
+          { prior: priorMd, feedback },
+        );
+        return storeDoc(s, "lld", lldMd);
+      },
+      { detail: (f) => f },
     );
-    const fname = await storeDoc(s, "lld", lldMd);
     return out(
       s,
       ["Rewritten with your changes. Take another look — more edits, or shall I file it?"],
@@ -916,13 +930,20 @@ async function odmReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
       // benchmark playbook — its §6 table then anchors the LLD.
       if (!s.data.lead_ref) s.data.lead_ref = await db.nextLeadRef();
       const transcript = await db.recentMessages(s.id, 60);
-      const benchMd = await llm.generateBenchmark(
-        s.data.slots,
-        s.data.contact,
-        s.data.lead_ref,
-        transcript,
+      const fname = await trackTask(
+        s.id,
+        "Draft the benchmark report",
+        async () => {
+          const benchMd = await llm.generateBenchmark(
+            s.data.slots,
+            s.data.contact,
+            s.data.lead_ref!,
+            transcript,
+          );
+          return storeDoc(s, "bench", benchMd);
+        },
+        { detail: (f) => f },
       );
-      const fname = await storeDoc(s, "bench", benchMd);
       s.state = "ODM_BENCH_REVIEW";
       return out(
         s,
@@ -946,13 +967,20 @@ async function odmReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
     if (inp.chip_id === "lld:generate") {
       if (!s.data.lead_ref) s.data.lead_ref = await db.nextLeadRef();
       const transcript = await db.recentMessages(s.id, 40);
-      const lldMd = await llm.generateLld(
-        s.data.slots,
-        s.data.contact,
-        s.data.lead_ref,
-        transcript,
+      const fname = await trackTask(
+        s.id,
+        "Draft the LLD",
+        async () => {
+          const lldMd = await llm.generateLld(
+            s.data.slots,
+            s.data.contact,
+            s.data.lead_ref!,
+            transcript,
+          );
+          return storeDoc(s, "lld", lldMd);
+        },
+        { detail: (f) => f },
       );
-      const fname = await storeDoc(s, "lld", lldMd);
       // The draft is EDITABLE — iterate with the customer until it reads
       // right, exactly like working a doc in Claude; only then file it.
       s.state = "ODM_LLD_REVIEW";

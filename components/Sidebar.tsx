@@ -25,6 +25,8 @@ export interface SidebarEnquiry {
   lead_ref: string;
   summary: string | null;
   created_at?: string | null;
+  /** Chat session behind this enquiry — lets a row REOPEN the conversation. */
+  session_id?: string | null;
 }
 
 /** Stable row identity: deal id once assigned, lead ref before that. */
@@ -61,6 +63,7 @@ interface HomeData {
 
 function startNewEnquiry() {
   try {
+    localStorage.removeItem("xor_session_id");
     sessionStorage.removeItem("xor_session_id");
   } catch {
     // private mode — the chat opens fresh anyway when nothing is stored
@@ -172,12 +175,13 @@ export default function Sidebar(props: Props) {
       ) : (
         home.enqs.map((q) => {
           const key = enquiryKey(q);
+          // A row with a session reopens the CONVERSATION (full history
+          // restores); without one it falls back to the account view.
+          const href = q.session_id
+            ? `/?resume=${encodeURIComponent(q.session_id)}`
+            : `/account?deal=${encodeURIComponent(key)}`;
           return (
-            <Link
-              key={key}
-              className="app-row"
-              href={`/account?deal=${encodeURIComponent(key)}`}
-            >
+            <Link key={key} className="app-row" href={href}>
               <span className="app-row-top">
                 <span className="app-row-id">{key}</span>
                 <span className="app-row-date">{shortDate(q.created_at)}</span>

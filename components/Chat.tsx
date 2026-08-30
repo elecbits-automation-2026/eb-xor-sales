@@ -124,6 +124,9 @@ export default function Chat() {
     if (sessionRef.current !== res.session_id) emit("xor:session", res.session_id);
     sessionRef.current = res.session_id;
     try {
+      // localStorage so the conversation survives a full browser restart,
+      // not just a reload (retention is a product requirement).
+      localStorage.setItem(SESSION_KEY, res.session_id);
       sessionStorage.setItem(SESSION_KEY, res.session_id);
     } catch {
       // private mode — session just won't survive a reload
@@ -204,15 +207,23 @@ export default function Chat() {
     openedRef.current = true;
     let stored: string | undefined;
     try {
-      stored = sessionStorage.getItem(SESSION_KEY) ?? undefined;
+      stored =
+        localStorage.getItem(SESSION_KEY) ?? sessionStorage.getItem(SESSION_KEY) ?? undefined;
     } catch {
       stored = undefined;
     }
     try {
       const params = new URLSearchParams(window.location.search);
+      // A sidebar row reopens ITS conversation: /?resume=<session_id>.
+      const resume = params.get("resume");
+      if (resume) {
+        stored = resume;
+        params.delete("resume");
+      }
       if (params.get("new") === "1") {
         stored = undefined;
         try {
+          localStorage.removeItem(SESSION_KEY);
           sessionStorage.removeItem(SESSION_KEY);
         } catch {
           // nothing stored to clear
