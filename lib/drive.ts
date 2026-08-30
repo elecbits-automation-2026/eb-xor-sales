@@ -544,30 +544,36 @@ const LLD_TPL_TTL_MS = 6 * 3_600_000;
 async function findLldTemplateFolder(): Promise<string | null> {
   const d = drive();
   const shared = { supportsAllDrives: true, includeItemsFromAllDrives: true } as const;
+  // "contains", not "=": the house convention prefixes folders with numbers
+  // ("Eb-07-Sales", "01-Accounts"), so "Sales Collateral" may really be
+  // "03-Sales-Collateral" — and Drive's contains matches word prefixes.
   const sc = await d.files.list({
-    q: `name = 'Sales Collateral' and mimeType = '${FOLDER_MIME}' and trashed = false`,
-    fields: "files(id)",
-    pageSize: 5,
+    q: `name contains 'Collateral' and mimeType = '${FOLDER_MIME}' and trashed = false`,
+    fields: "files(id,name)",
+    pageSize: 10,
     ...shared,
   });
   for (const f of sc.data.files ?? []) {
     if (!f.id) continue;
     const kid = await d.files.list({
-      q: `'${f.id}' in parents and name = 'LLD' and mimeType = '${FOLDER_MIME}' and trashed = false`,
-      fields: "files(id)",
-      pageSize: 1,
+      q: `'${f.id}' in parents and name contains 'LLD' and mimeType = '${FOLDER_MIME}' and trashed = false`,
+      fields: "files(id,name)",
+      pageSize: 5,
       ...shared,
     });
-    if (kid.data.files?.[0]?.id) return kid.data.files[0].id;
+    const hit = kid.data.files?.find((k) => k.id);
+    if (hit?.id) return hit.id;
   }
-  // Fallback: any folder literally named "LLD" the account can see.
+  // Fallback: any folder with LLD in its name — prefer the plainest match.
   const any = await d.files.list({
-    q: `name = 'LLD' and mimeType = '${FOLDER_MIME}' and trashed = false`,
-    fields: "files(id)",
-    pageSize: 1,
+    q: `name contains 'LLD' and mimeType = '${FOLDER_MIME}' and trashed = false`,
+    fields: "files(id,name)",
+    pageSize: 10,
     ...shared,
   });
-  return any.data.files?.[0]?.id ?? null;
+  const folders = (any.data.files ?? []).filter((f) => f.id);
+  folders.sort((a, b) => (a.name?.length ?? 99) - (b.name?.length ?? 99));
+  return folders[0]?.id ?? null;
 }
 
 async function fetchLldTemplatesUncached(): Promise<string> {
