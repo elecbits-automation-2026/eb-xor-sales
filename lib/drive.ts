@@ -161,6 +161,13 @@ export interface DriveHandoffPayload {
   files: HandoffFileRef[];
   summary_md: string;
   lld: { filename: string; storage_path: string } | null;
+  /**
+   * Capture timestamp ("YYYY-MM-DD HHmm" IST), computed once at finalize and
+   * carried in the payload so a retried handoff writes the SAME names
+   * (skip-existing idempotency). Prefixes the generated summary; the
+   * orchestrator already prefixes files/lld with it.
+   */
+  stamp?: string | null;
 }
 
 export interface DriveResult {
@@ -229,7 +236,7 @@ export async function driveHandoff(p: DriveHandoffPayload): Promise<DriveResult>
     );
   }
 
-  const summaryName = `${p.lead_ref}-intake-summary.md`;
+  const summaryName = `${p.stamp ? `${p.stamp} ` : ""}${p.lead_ref}-intake-summary.md`;
   if (!already.has(summaryName)) {
     fileIds[summaryName] = await uploadBytes(
       intakeId,

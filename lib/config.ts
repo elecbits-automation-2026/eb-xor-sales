@@ -29,7 +29,7 @@ export const cfg = {
     return process.env.ANTHROPIC_API_KEY || "";
   },
   get model() {
-    return process.env.XOR_BOT_MODEL || "claude-sonnet-4-5";
+    return process.env.XOR_BOT_MODEL || "claude-opus-5";
   },
   get triageConfidence() {
     return num("TRIAGE_CONFIDENCE", 0.75);
