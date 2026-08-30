@@ -21,7 +21,7 @@
  * renders the letterhead without the image, and unreadable brand fonts fall
  * back to the built-in Helvetica faces (losing the ₹ glyph, nothing else).
  */
-import { readFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import path from "path";
 
 import PDFDocument from "pdfkit";
@@ -677,10 +677,17 @@ export async function brandedPdf(
   markdown: string,
   meta: { docLabel: string; leadRef: string; dealId?: string | null; company?: string | null; date?: string },
 ): Promise<Buffer> {
+  // The constructor loads its default font (Helvetica) from pdfkit's own
+  // .afm data files — the classic serverless failure when the bundler drops
+  // them. Point the default at our bundled TTF instead, so the constructor
+  // never touches an AFM; Helvetica stays the last-resort when even the
+  // bundled font is missing.
+  const dejaVu = path.join(process.cwd(), "assets/fonts/DejaVuSans.ttf");
   const doc = new PDFDocument({
     size: "A4",
     margins: { top: MARGIN, bottom: MARGIN, left: MARGIN, right: MARGIN },
     bufferPages: true, // keep pages so footers can stamp "Page X of Y" at the end
+    ...(existsSync(dejaVu) ? { font: dejaVu } : {}),
     info: {
       Title: `${meta.docLabel} — ${meta.leadRef}`,
       Author: "Elecbits · XoR",

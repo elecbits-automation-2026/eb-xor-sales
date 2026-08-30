@@ -181,7 +181,21 @@ export default function Sidebar(props: Props) {
             ? `/?resume=${encodeURIComponent(q.session_id)}`
             : `/account?deal=${encodeURIComponent(key)}`;
           return (
-            <Link key={key} className="app-row" href={href}>
+            <Link
+              key={key}
+              className="app-row"
+              href={href}
+              onClick={(e) => {
+                // Same-route ?resume= navigation never remounts the chat —
+                // hand the switch to the Chat pane directly instead.
+                if (q.session_id && window.location.pathname === "/") {
+                  e.preventDefault();
+                  window.dispatchEvent(
+                    new CustomEvent("xor:resume", { detail: q.session_id }),
+                  );
+                }
+              }}
+            >
               <span className="app-row-top">
                 <span className="app-row-id">{key}</span>
                 <span className="app-row-date">{shortDate(q.created_at)}</span>

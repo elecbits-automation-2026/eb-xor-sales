@@ -42,6 +42,8 @@ export async function GET(req: NextRequest) {
     retries?: { pending: number; last_error?: string } | { error: string };
     brain?: { chars: number; age_minutes: number } | "empty" | { error: string };
     kb?: { documents: number; last_synced: string | null; embedder: string } | { error: string };
+    pdf?: { ok: true; bytes: number } | { error: string };
+    lld_templates?: { chars: number } | "empty" | { error: string };
   } = {
     ok: true,
     mock_llm: cfg.mockLlm,
@@ -102,6 +104,30 @@ export async function GET(req: NextRequest) {
       } catch (e) {
         body.write_probe = { error: errText(e) };
       }
+      // Are the house LLD templates reachable? Empty means the generator
+      // is running without its authoritative structure.
+      try {
+        const { lldTemplatesText } = await import("@/lib/drive");
+        const tpl = await lldTemplatesText();
+        body.lld_templates = tpl ? { chars: tpl.length } : "empty";
+      } catch (e) {
+        body.lld_templates = { error: errText(e) };
+      }
+    }
+    // Can this deploy actually render the branded PDF? The exact error
+    // (missing font trace, pdfkit data files) surfaces here verbatim.
+    try {
+      const { brandedPdf } = await import("@/lib/lld-pdf");
+      const buf = await brandedPdf(
+        "# Probe\n\n| A | B |\n|---|---|\n| 1 | ₹2 |\n\nProbe body.",
+        { docLabel: "Health probe", leadRef: "PROBE" },
+      );
+      body.pdf =
+        buf.subarray(0, 5).toString("latin1") === "%PDF-"
+          ? { ok: true, bytes: buf.length }
+          : { error: "renderer returned non-PDF bytes" };
+    } catch (e) {
+      body.pdf = { error: errText(e) };
     }
     // Is the Drive knowledge actually loaded? "empty" = never crawled (or
     // every crawl failed) — the bot then runs on the model alone.

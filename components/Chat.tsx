@@ -242,6 +242,31 @@ export default function Chat() {
     void post({ kind: "open" }, stored);
   }, [post]);
 
+  // A sidebar click switches to that deal's conversation in place — a
+  // same-route ?resume= navigation never remounts this component, so the
+  // Sidebar dispatches xor:resume and we re-open the pane ourselves.
+  useEffect(() => {
+    const onResume = (e: Event) => {
+      const sid = (e as CustomEvent<string>).detail;
+      if (!sid || sid === sessionRef.current || busyRef.current) return;
+      setEntries([]);
+      try {
+        const params = new URLSearchParams(window.location.search);
+        params.set("resume", sid);
+        window.history.replaceState(
+          {},
+          "",
+          `${window.location.pathname}?${params.toString()}${window.location.hash}`,
+        );
+      } catch {
+        // URL update is cosmetic — the switch itself still happens
+      }
+      void post({ kind: "open" }, sid);
+    };
+    window.addEventListener("xor:resume", onResume);
+    return () => window.removeEventListener("xor:resume", onResume);
+  }, [post]);
+
   // Auto-scroll on new content.
   useEffect(() => {
     const el = logRef.current;
@@ -420,6 +445,11 @@ export default function Chat() {
   const [micOk, setMicOk] = useState(false);
   const [voiceOn, setVoiceOn] = useState(false);
   const [hearing, setHearing] = useState(false);
+  // The speaker governs XoR's voice OUTPUT independently of the mic: mute
+  // it and replies stay silent (any speech in progress stops immediately)
+  // while the mic keeps taking the visitor's voice input.
+  const [speakerOn, setSpeakerOn] = useState(true);
+  const speakerRef = useRef(true);
   useEffect(() => {
     let alive = true;
     // async so the lint-guarded "no sync setState in effect" holds; also
@@ -502,6 +532,12 @@ export default function Chat() {
   /** Read a reply aloud; when it finishes, hand the turn back to the visitor. */
   const speak = useCallback(
     (text: string) => {
+      // Speaker muted: stay silent, but in a voice conversation the turn
+      // still comes back to the visitor right away.
+      if (!speakerRef.current) {
+        if (voiceRef.current) listenOnce();
+        return;
+      }
       try {
         const synth = window.speechSynthesis;
         if (!synth) {
@@ -549,6 +585,23 @@ export default function Chat() {
     voiceRef.current = true;
     setVoiceOn(true);
     listenOnce();
+  };
+
+  /** Mute/unmute XoR's voice; muting cuts off any reply mid-sentence. */
+  const toggleSpeaker = () => {
+    const next = !speakerRef.current;
+    speakerRef.current = next;
+    setSpeakerOn(next);
+    if (!next) {
+      try {
+        window.speechSynthesis?.cancel();
+      } catch {
+        // nothing was speaking
+      }
+      // The cancelled utterance's onend does not fire reliably everywhere —
+      // hand the turn back to the visitor ourselves (no-op if already listening).
+      if (voiceRef.current) listenOnce();
+    }
   };
 
   // ── render ──────────────────────────────────────────────────────────────
@@ -666,10 +719,45 @@ export default function Chat() {
             {micOk && (
               <button
                 type="button"
+                className={`mic spk${speakerOn ? "" : " off"}`}
+                onClick={toggleSpeaker}
+                aria-label={speakerOn ? "Mute XoR's voice" : "Unmute XoR's voice"}
+                aria-pressed={!speakerOn}
+                title={speakerOn ? "XoR speaks replies — click to mute" : "XoR is muted — click to unmute"}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path
+                    d="M11 5 6.5 9H3v6h3.5L11 19V5Z"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinejoin="round"
+                  />
+                  {speakerOn ? (
+                    <path
+                      d="M15 9a4 4 0 0 1 0 6M17.5 6.5a8 8 0 0 1 0 11"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                    />
+                  ) : (
+                    <path
+                      d="m15.5 9.5 5 5m0-5-5 5"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                    />
+                  )}
+                </svg>
+              </button>
+            )}
+            {micOk && (
+              <button
+                type="button"
                 className={`mic${voiceOn ? " rec" : ""}`}
                 onClick={toggleVoice}
                 aria-label={voiceOn ? "End the voice conversation" : "Start a voice conversation"}
                 aria-pressed={voiceOn}
+                title={voiceOn ? "Voice conversation on — click to end" : "Talk to XoR"}
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                   <rect x="9" y="2.5" width="6" height="11" rx="3" stroke="currentColor" strokeWidth="2" />

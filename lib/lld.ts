@@ -30,9 +30,9 @@ Captured intake summary:
 ${lines}
 
 ## 2. System Architecture
-Block-level architecture to be drafted in the first engineering session:
-processing core, power subsystem, connectivity, sensing/IO, and enclosure
-interfaces derived from the features above. *(block diagram to follow)*
+Block-level architecture: processing core, power subsystem, connectivity,
+sensing/IO, and enclosure interfaces derived from the features above.
+*(assumption — refine on regeneration)*
 
 ## 3. Functional Requirements
 - FR-1: The product shall deliver: ${g("key_features")}
@@ -40,12 +40,12 @@ interfaces derived from the features above. *(block diagram to follow)*
 - FR-3: The BoM shall target a unit cost of ${g("target_unit_cost")} (assumption — to be validated).
 
 ## 4. Electrical Design
-Candidate MCU/SoC class, power architecture and interface set will be
-proposed against FR-1 during architecture review. *(assumption placeholders —
-Elecbits engineering to complete)*
+Candidate MCU/SoC class, power architecture and interface set sized against
+FR-1. *(assumption — refine on regeneration)*
 
 ## 5. Mechanical & Enclosure
-To be derived from use environment and certification targets below.
+Sized from the use environment and certification targets below.
+*(assumption — refine on regeneration)*
 
 ## 6. Firmware & Connectivity
 Derived from: ${g("key_features")}
@@ -97,7 +97,7 @@ Prepared by: Elecbits Sales Engineering / XOR Assist for ${contact["company"] ??
 
 | Dimension | Bench A | Bench B | Our Target |
 |---|---|---|---|
-| Street price | TBD | TBD | ${g("budget")} |
+| Street price | TBD | TBD | ${g("target_unit_cost")} |
 | Core spec | TBD | TBD | ${g("key_features")} |
 
 ## 6. Target Specifications

@@ -531,3 +531,104 @@ export async function exportKbFileText(f: KbSourceFile): Promise<string | null> 
   }
   return null;
 }
+
+// ─────────────── house LLD templates (Sales Collateral / LLD) ──────────────
+// The LLD generator mirrors the REAL Elecbits LLD templates — structure,
+// headings, tone — not an invented shape. They live in Drive under
+// "Sales Collateral / LLD"; cached in settings so generation never waits on
+// a cold Drive walk twice in the same window.
+
+const LLD_TPL_KEY = "kb:lld_templates";
+const LLD_TPL_TTL_MS = 6 * 3_600_000;
+
+async function findLldTemplateFolder(): Promise<string | null> {
+  const d = drive();
+  const shared = { supportsAllDrives: true, includeItemsFromAllDrives: true } as const;
+  const sc = await d.files.list({
+    q: `name = 'Sales Collateral' and mimeType = '${FOLDER_MIME}' and trashed = false`,
+    fields: "files(id)",
+    pageSize: 5,
+    ...shared,
+  });
+  for (const f of sc.data.files ?? []) {
+    if (!f.id) continue;
+    const kid = await d.files.list({
+      q: `'${f.id}' in parents and name = 'LLD' and mimeType = '${FOLDER_MIME}' and trashed = false`,
+      fields: "files(id)",
+      pageSize: 1,
+      ...shared,
+    });
+    if (kid.data.files?.[0]?.id) return kid.data.files[0].id;
+  }
+  // Fallback: any folder literally named "LLD" the account can see.
+  const any = await d.files.list({
+    q: `name = 'LLD' and mimeType = '${FOLDER_MIME}' and trashed = false`,
+    fields: "files(id)",
+    pageSize: 1,
+    ...shared,
+  });
+  return any.data.files?.[0]?.id ?? null;
+}
+
+async function fetchLldTemplatesUncached(): Promise<string> {
+  const folderId = await findLldTemplateFolder();
+  if (!folderId) return "";
+  const kids = await drive().files.list({
+    q: `'${folderId}' in parents and trashed = false`,
+    orderBy: "modifiedTime desc",
+    fields: "files(id,name,mimeType,modifiedTime)",
+    pageSize: 10,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+  });
+  const parts: string[] = [];
+  for (const f of kids.data.files ?? []) {
+    if (!f.id || f.mimeType === FOLDER_MIME) continue;
+    try {
+      const text = await exportKbFileText({
+        id: f.id,
+        name: f.name ?? "(untitled)",
+        mimeType: f.mimeType ?? "",
+        modifiedTime: f.modifiedTime ?? "",
+        sourceFolder: "lld-templates",
+      });
+      if (text && text.trim().length > 400) {
+        parts.push(`--- TEMPLATE: ${f.name} ---\n${text.trim().slice(0, 15_000)}`);
+      }
+    } catch (err) {
+      console.error(`LLD template read failed: ${f.name}`, err);
+    }
+    if (parts.length >= 2) break; // two complete house templates is plenty
+  }
+  return parts.join("\n\n").slice(0, 30_000);
+}
+
+/** House LLD template text, settings-cached 6h; "" when unavailable. */
+export async function lldTemplatesText(): Promise<string> {
+  if (cfg.mockDrive) return "";
+  const db = getDb();
+  let stale = "";
+  try {
+    const cached = await db.getSetting(LLD_TPL_KEY);
+    if (cached) {
+      const { at, text } = JSON.parse(cached) as { at: number; text: string };
+      stale = text ?? "";
+      if (stale && Date.now() - at < LLD_TPL_TTL_MS) return stale;
+    }
+  } catch {
+    // unreadable cache — refetch below
+  }
+  try {
+    const text = await fetchLldTemplatesUncached();
+    if (text) {
+      await db
+        .setSetting(LLD_TPL_KEY, JSON.stringify({ at: Date.now(), text }))
+        .catch(() => undefined);
+      return text;
+    }
+    return stale; // an empty walk never clobbers a known-good template
+  } catch (err) {
+    console.error("LLD template fetch failed — using cached/none", err);
+    return stale;
+  }
+}
