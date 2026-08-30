@@ -11,7 +11,7 @@ import { driveHandoff, type DriveHandoffPayload } from "@/lib/drive";
 import { appendFunnelRow } from "@/lib/sheets";
 import { getDb } from "@/lib/supabase";
 
-export const maxDuration = 60;
+export const maxDuration = 300; // plan ceiling — big backfills need the room
 
 const MAX_ATTEMPTS = 8;
 const BASE_DELAY_MS = 15 * 60_000;
