@@ -172,7 +172,7 @@ function ProjectsView({
             </Link>
           </div>
         ) : (
-          <EnquiryDetail q={selected} />
+          <EnquiryDetail q={selected} company={me.client?.company ?? null} />
         )}
       </section>
     </div>
@@ -208,95 +208,212 @@ function Transcript({ dealRef }: { dealRef: string }) {
   if (msgs === "error") return <p className="pv-quiet">Couldn&apos;t load the conversation.</p>;
   if (!msgs.length) return <p className="pv-quiet">No messages stored for this enquiry.</p>;
   return (
-    <div className="pv-chat">
-      {msgs.map((m, i) => (
-        <div key={i} className={`pv-msg ${m.role === "user" ? "user" : "bot"}`}>
-          {m.content}
-        </div>
-      ))}
-    </div>
+    <details className="pv-convo">
+      <summary className="pv-convo-line">
+        <svg
+          className="pv-convo-chev"
+          width="11"
+          height="11"
+          viewBox="0 0 24 24"
+          fill="none"
+          aria-hidden="true"
+        >
+          <path
+            d="m9 5.5 7 6.5-7 6.5"
+            stroke="currentColor"
+            strokeWidth="2.6"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+        View the conversation
+        <span className="pv-convo-n">
+          {msgs.length} message{msgs.length === 1 ? "" : "s"}
+        </span>
+      </summary>
+      <div className="pv-chat">
+        {msgs.map((m, i) => (
+          <div key={i} className={`pv-msg ${m.role === "user" ? "user" : "bot"}`}>
+            {m.content}
+          </div>
+        ))}
+      </div>
+    </details>
   );
 }
 
+// ── the status journey ────────────────────────────────────────────────────
+/**
+ * The five stages an enquiry moves through once it lands with the team.
+ * `note` is the one-line reassurance shown while that stage is the active
+ * one — written for the person who is waiting, not for the team.
+ */
+const JOURNEY: { label: string; note?: string }[] = [
+  { label: "Received" },
+  {
+    label: "Sales engineering review",
+    note: "Your sales engineer is reviewing this — typically within one working day.",
+  },
+  { label: "Scoping call", note: "The team will reach out to set up a scoping call." },
+  { label: "Proposal", note: "A commercial proposal is being prepared for you." },
+  { label: "Project sanction", note: "Final sign-off — your project is about to kick off." },
+];
+
+/**
+ * Which stage is ACTIVE for a stored status (everything before it is done).
+ * Today the API only distinguishes "Received" and "Filed" — both mean the
+ * enquiry is captured and sitting with sales engineering — so both resolve
+ * to stage 1. New statuses just need a row here.
+ */
+const STAGE_BY_STATUS: Record<string, number> = { Received: 1, Filed: 1 };
+function journeyStage(status: string | null): number {
+  return STAGE_BY_STATUS[status ?? ""] ?? 1;
+}
+
 // ── one enquiry, full detail ──────────────────────────────────────────────
-function EnquiryDetail({ q }: { q: Enquiry }) {
+function EnquiryDetail({ q, company }: { q: Enquiry; company: string | null }) {
   const ref = q.deal_id || q.lead_ref;
   const parsed = q.created_at ? new Date(q.created_at) : null;
   const date =
-    parsed && !Number.isNaN(parsed.getTime()) ? parsed.toLocaleDateString("en-GB") : "—";
+    parsed && !Number.isNaN(parsed.getTime())
+      ? parsed.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })
+      : "—";
   const filed = q.status === "Filed";
+  const active = journeyStage(q.status);
+  // Two-tone display ID: the final segment carries the accent.
+  const cut = ref.lastIndexOf("-");
+  const [refHead, refTail] = cut > 0 ? [ref.slice(0, cut + 1), ref.slice(cut + 1)] : [ref, ""];
+
   return (
-    <div className="pv">
-      <header className="pv-head">
-        <h1>{ref}</h1>
-        {q.track_label ? <span className="pv-pill">{q.track_label}</span> : null}
-        {q.status ? <span className={`pv-pill${filed ? " ok" : ""}`}>{q.status}</span> : null}
+    <article className="pv">
+      <header className="pv-hero">
+        <p className="pv-meta">
+          <span>Created {date}</span>
+          <span className="pv-meta-sep" aria-hidden="true">
+            ·
+          </span>
+          <span>Reference {q.lead_ref}</span>
+        </p>
+        <h1 className="pv-id">
+          {refHead}
+          {refTail ? <span className="pv-id-tail">{refTail}</span> : null}
+        </h1>
+        <div className="pv-tags">
+          {company ? <span className="pv-pill">{company}</span> : null}
+          {q.track_label ? <span className="pv-pill acc">{q.track_label}</span> : null}
+          {q.status ? (
+            <span className={`pv-pill ${filed ? "ok" : "live"}`}>
+              <i className="pv-pill-dot" aria-hidden="true" />
+              {q.status}
+            </span>
+          ) : null}
+        </div>
+        {q.summary ? <p className="pv-lede">{q.summary}</p> : null}
       </header>
 
-      <div className="pv-card">
-        <div className="pv-cell">
-          <span className="pv-k">Summary</span>
-          <span className="pv-v">{q.summary || "—"}</span>
+      <section className="pv-journey" aria-label="Where this enquiry stands">
+        <ol className="pv-steps">
+          {JOURNEY.map((s, i) => {
+            const state = i < active ? "done" : i === active ? "active" : "ahead";
+            return (
+              <li key={s.label} className={`pv-step ${state}`}>
+                <span className="pv-step-dot" aria-hidden="true">
+                  {i < active ? (
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <path
+                        d="m5 12.5 4.5 4.5L19 7.5"
+                        stroke="currentColor"
+                        strokeWidth="3.4"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  ) : null}
+                </span>
+                <span className="pv-step-label">
+                  {s.label}
+                  {i === active ? <span className="pv-sr">(current stage)</span> : null}
+                </span>
+              </li>
+            );
+          })}
+        </ol>
+        {JOURNEY[active]?.note ? <p className="pv-journey-note">{JOURNEY[active].note}</p> : null}
+      </section>
+
+      <dl className="pv-stats">
+        <div className="pv-stat">
+          <dt>Quantity</dt>
+          <dd>{q.quantity || "—"}</dd>
         </div>
-        <div className="pv-cells">
-          <div className="pv-cell">
-            <span className="pv-k">Quantity</span>
-            <span className="pv-v">{q.quantity || "—"}</span>
-          </div>
-          <div className="pv-cell">
-            <span className="pv-k">Timeline</span>
-            <span className="pv-v">{q.timeline || "—"}</span>
-          </div>
-          <div className="pv-cell">
-            <span className="pv-k">Created</span>
-            <span className="pv-v">{date}</span>
-          </div>
-          <div className="pv-cell">
-            <span className="pv-k">Reference</span>
-            <span className="pv-v pv-mono">{q.lead_ref}</span>
-          </div>
+        <div className="pv-stat">
+          <dt>Timeline</dt>
+          <dd>{q.timeline || "—"}</dd>
         </div>
-      </div>
+        <div className="pv-stat">
+          <dt>Created</dt>
+          <dd>{date}</dd>
+        </div>
+        <div className="pv-stat">
+          <dt>Reference</dt>
+          <dd className="pv-stat-mono">{q.lead_ref}</dd>
+        </div>
+      </dl>
 
       <section className="pv-sec">
-        <h2 className="pv-k">Documents</h2>
+        <h2 className="pv-h">Documents</h2>
         {q.lld_url ? (
-          <a className="pv-dl" href={q.lld_url} download>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path
-                d="M12 3v12m0 0 4.5-4.5M12 15l-4.5-4.5M4 20h16"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-            Download LLD draft
+          <a className="pv-file" href={q.lld_url} download>
+            <span className="pv-file-icon" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinejoin="round"
+                />
+                <path d="M14 3v5h5" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+                <path
+                  d="M9 13.5h6M9 17h6"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </span>
+            <span className="pv-file-body">
+              <span className="pv-file-name">Low-level design draft</span>
+              <span className="pv-file-kind">Markdown draft · generated from this enquiry</span>
+            </span>
+            <span className="pv-file-get" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M12 4v11m0 0 4.5-4.5M12 15l-4.5-4.5M5 20h14"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </span>
           </a>
         ) : (
-          <p className="pv-quiet">Your LLD draft will appear here once generated.</p>
+          <p className="pv-file-empty">
+            Nothing to download just yet — the moment your sales engineer drafts a document for
+            this enquiry, it will appear right here.
+          </p>
         )}
+        <p className="pv-docnote">Uploaded files are with the sales engineering team.</p>
       </section>
 
       <section className="pv-sec">
-        <h2 className="pv-k">Conversation</h2>
         <Transcript key={ref} dealRef={ref} />
       </section>
 
-      <section className="pv-sec">
-        <h2 className="pv-k">What happens next</h2>
-        <ol className="pv-next">
-          <li>
-            <i>1</i> Sales engineering review
-          </li>
-          <li>
-            <i>2</i> Scoping call
-          </li>
-          <li>
-            <i>3</i> Proposal
-          </li>
-        </ol>
-      </section>
-    </div>
+      <footer className="pv-foot">
+        <span>Questions meanwhile?</span>
+        <a href="mailto:sales@elecbits.in">sales@elecbits.in</a>
+      </footer>
+    </article>
   );
 }

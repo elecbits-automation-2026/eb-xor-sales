@@ -130,6 +130,7 @@ export async function handle(inp: ChatIn, authUser?: AuthUser | null): Promise<C
   if (authUser && s.data.auth_user_id !== authUser.id) {
     s.data.auth_user_id = authUser.id;
     s.data.auth_email = authUser.email;
+    s.data.auth_name = authUser.name || null;
     s.data.sales_agent = authUser.sales_agent ?? null;
   }
 
@@ -407,11 +408,26 @@ async function setTrack(s: SessionRow, track: Track): Promise<ChatOut> {
       "Let's find you the right product. Quick coordinates first so the " +
       "team can follow up with the catalogue and pricing.",
   }[track];
-  return out(s, [intro], [form("contact", "How do we reach you?", CONTACT_FORM, "Save & continue")]);
+  return out(s, [intro], [contactFormFor(s)]);
+}
+
+/**
+ * The contact form, prefilled with whatever the login already told us —
+ * a signed-in visitor never re-types their own name and email.
+ */
+function contactFormFor(s: SessionRow): Widget {
+  const known: Record<string, string | undefined> = {
+    name: s.data.contact.name || s.data.auth_name || undefined,
+    email: s.data.contact.email || s.data.auth_email || undefined,
+    company: s.data.contact.company || undefined,
+    phone: s.data.contact.phone || undefined,
+  };
+  const fields = CONTACT_FORM.map((f) => (known[f.key] ? { ...f, value: known[f.key] } : f));
+  return form("contact", "How do we reach you?", fields, "Save & continue");
 }
 
 async function contact(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
-  const contactForm = form("contact", "How do we reach you?", CONTACT_FORM, "Save & continue");
+  const contactForm = contactFormFor(s);
   if (inp.kind !== "form" || inp.form?.form_id !== "contact") {
     return out(s, ["The quickest way is the little form below — takes ten seconds."], [contactForm]);
   }
@@ -1177,7 +1193,7 @@ function resumeWidget(s: SessionRow): Widget | null {
       return chips([{ id: "confirm:yes", label: "Yes, that's right" }, ...others]);
     }
     case "CONTACT":
-      return form("contact", "How do we reach you?", CONTACT_FORM, "Save & continue");
+      return contactFormFor(s);
     case "CLIENT_INDUSTRY":
       return industryChips();
     case "CLIENT_ORGSIZE":
