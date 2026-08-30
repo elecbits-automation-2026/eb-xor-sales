@@ -981,7 +981,7 @@ async function odmBenchReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
           progress("rendering the branded PDF");
           return storeDoc(s, "bench", benchMd, progress);
         },
-        { detail: (f) => f, failDetail: "revision failed — current report untouched" },
+        { detail: (f) => f, failDetail: (e) => `${errShort(e)} — current report untouched` },
       );
     } catch (err) {
       console.error(`benchmark revision failed session=${s.id}`, err);
@@ -1050,7 +1050,7 @@ async function odmLldReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
           progress("rendering the branded PDF");
           return storeDoc(s, "lld", lldMd, progress);
         },
-        { detail: (f) => f, failDetail: "revision failed — current draft untouched" },
+        { detail: (f) => f, failDetail: (e) => `${errShort(e)} — current draft untouched` },
       );
     } catch (err) {
       console.error(`LLD revision failed session=${s.id}`, err);
@@ -1075,6 +1075,12 @@ async function odmLldReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
     );
   }
   return resume(s);
+}
+
+/** Short, row-safe rendering of a generator error for the task feed. */
+function errShort(e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e);
+  return raw.replace(/\s+/g, " ").slice(0, 140);
 }
 
 const SANCTION_CHIPS = [
@@ -1140,7 +1146,7 @@ async function odmReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
             progress("rendering the branded PDF");
             return storeDoc(s, "bench", benchMd, progress);
           },
-          { detail: (f) => f, failDetail: "generation failed — hit the chip to retry" },
+          { detail: (f) => f, failDetail: (e) => `${errShort(e)} — hit the chip to retry` },
         );
       } catch (err) {
         console.error(`benchmark generation failed session=${s.id}`, err);
@@ -1193,7 +1199,7 @@ async function odmReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
             progress("rendering the branded PDF");
             return storeDoc(s, "lld", lldMd, progress);
           },
-          { detail: (f) => f, failDetail: "generation failed — hit the chip to retry" },
+          { detail: (f) => f, failDetail: (e) => `${errShort(e)} — hit the chip to retry` },
         );
       } catch (err) {
         console.error(`LLD generation failed session=${s.id}`, err);
