@@ -11,6 +11,7 @@ import * as orchestrator from "@/lib/orchestrator";
 import { clientKey, rateLimitOk } from "@/lib/ratelimit";
 import { getDb } from "@/lib/supabase";
 import { noteTask } from "@/lib/tasks";
+import { istTimestamp } from "@/lib/util";
 import { sanitizeFilename } from "@/lib/util";
 
 export async function POST(req: NextRequest) {
@@ -82,7 +83,29 @@ export async function POST(req: NextRequest) {
     drive_file_id: null,
   });
 
-  await noteTask(s.id, `Receive ${safe}`, "completed", item.label);
+  // Deal folder already exists (IDs are issued early)? Deliver the file to
+  // Drive right now — best-effort; a failure leaves it staged and the
+  // finalize handoff (with its retry queue) delivers it instead.
+  let taskDetail = item.label;
+  if (!cfg.mockDrive && s.data.drive?.folder_id) {
+    try {
+      const { uploadStagedFile } = await import("@/lib/drive");
+      const stamp = istTimestamp().replace(":", "");
+      const driveId = await uploadStagedFile(
+        s.data.drive.folder_id,
+        `${stamp} ${item.key}--${safe}`,
+        expected,
+      );
+      if (driveId) {
+        await db.markLeadFileDelivered(s.id, expected, driveId);
+        taskDetail = `${item.label} → Drive`;
+      }
+    } catch (err) {
+      console.error(`immediate drive delivery failed session=${s.id} file=${safe}`, err);
+      taskDetail = `${item.label} — staged, delivers with the handoff`;
+    }
+  }
+  await noteTask(s.id, `Receive ${safe}`, "completed", taskDetail);
   const res = await orchestrator.handleUpload(s, item.key, safe);
   return NextResponse.json(res);
 }

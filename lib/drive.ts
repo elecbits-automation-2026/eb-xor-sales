@@ -198,6 +198,55 @@ export interface DriveResult {
  * storage object is logged and skipped — one lost file must not sink the
  * whole handoff.
  */
+/**
+ * SOP layout (Law 5: folder = the ID alone): client folder EB-C-YY-nnnn in
+ * the Sales container, deal folder EB-D-…-ss inside it — a LIGHT folder with
+ * no blueprint tree; the full project tree belongs to the project ULM opens
+ * at sanction, never to the deal. Find-or-create throughout, so the early
+ * (mid-chat) provisioning and the finalize handoff converge on ONE tree.
+ */
+export async function provisionDealFolders(p: {
+  client_code: string;
+  deal_id: string;
+  client_folder_id?: string | null;
+}): Promise<{
+  client_folder_id: string;
+  client_folder_url: string;
+  folder_id: string;
+  folder_url: string;
+}> {
+  const { resolveAccountsFolder } = await import("./gtargets");
+  const parent = (await resolveAccountsFolder()).id;
+  const clientFolderId = p.client_folder_id ?? (await ensureFolder(p.client_code, parent));
+  const folderId = await ensureFolder(p.deal_id, clientFolderId);
+  return {
+    client_folder_id: clientFolderId,
+    client_folder_url: `https://drive.google.com/drive/folders/${clientFolderId}`,
+    folder_id: folderId,
+    folder_url: `https://drive.google.com/drive/folders/${folderId}`,
+  };
+}
+
+/**
+ * Deliver ONE staged upload into a deal folder right when it arrives
+ * (skip-existing, so finalize replays stay idempotent). Returns the Drive
+ * file id, or null when the object is missing/already delivered.
+ */
+export async function uploadStagedFile(
+  folderId: string,
+  name: string,
+  storagePath: string,
+): Promise<string | null> {
+  const already = await listChildNames(folderId);
+  if (already.has(name)) return null;
+  const bytes = await getDb().getObject(storagePath);
+  if (!bytes) {
+    console.error(`drive: storage object missing for ${storagePath} — skipping "${name}"`);
+    return null;
+  }
+  return uploadBytes(folderId, name, bytes, "application/octet-stream");
+}
+
 export async function driveHandoff(p: DriveHandoffPayload): Promise<DriveResult> {
   const { resolveAccountsFolder } = await import("./gtargets");
   const parent = (await resolveAccountsFolder()).id;
@@ -206,12 +255,13 @@ export async function driveHandoff(p: DriveHandoffPayload): Promise<DriveResult>
   let rootId: string;
   let intakeId: string;
   if (p.client_code) {
-    // SOP layout (Law 5: folder = the ID alone): client folder EB-C-YY-nnnn
-    // in the Sales container, deal folder EB-D-…-ss inside it — a LIGHT
-    // folder with no blueprint tree; the full project tree belongs to the
-    // project ULM opens at sanction, never to the deal.
-    clientFolderId = p.client_folder_id ?? (await ensureFolder(p.client_code, parent));
-    rootId = await ensureFolder(p.deal_id ?? p.lead_ref, clientFolderId);
+    const refs = await provisionDealFolders({
+      client_code: p.client_code,
+      deal_id: p.deal_id ?? p.lead_ref,
+      client_folder_id: p.client_folder_id,
+    });
+    clientFolderId = refs.client_folder_id;
+    rootId = refs.folder_id;
     intakeId = rootId;
   } else {
     // Legacy layout for handoff payloads queued before the SOP alignment.
