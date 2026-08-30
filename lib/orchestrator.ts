@@ -179,6 +179,8 @@ export async function handle(inp: ChatIn, authUser?: AuthUser | null): Promise<C
         return await odmSlots(s, inp, history);
       case "ODM_REVIEW":
         return await odmReview(s, inp);
+      case "ODM_LLD_REVIEW":
+        return await odmLldReview(s, inp);
       case "EMS_CHECKLIST":
         return await emsChecklist(s, inp, history);
       case "EMS_DETAILS":
@@ -260,6 +262,9 @@ async function goBack(s: SessionRow): Promise<ChatOut> {
     case "EMS_DETAILS":
       s.state = "EMS_CHECKLIST";
       break;
+    case "ODM_LLD_REVIEW":
+      s.state = "ODM_REVIEW";
+      break;
     case "ODM_REVIEW": {
       const answered = ODM_SLOTS.filter(([k]) => k in d.slots).map(([k]) => k);
       const last = answered[answered.length - 1];
@@ -339,7 +344,11 @@ async function discover(s: SessionRow, inp: ChatIn, history: Msg[]): Promise<Cha
     const others = TRACK_CHIPS.slice(0, 3).filter((c) => c.id !== `track:${t.track}`);
     const opts = [{ id: "confirm:yes", label: "Yes, that's right" }, ...others];
     const reply = (t.reply ?? "").trim();
-    const msg = reply ? `${reply} Have I got that right?` : "Have I got that right?";
+    const msg = reply
+      ? reply.endsWith("?")
+        ? reply
+        : `${reply} Have I got that right?`
+      : "Have I got that right?";
     return out(s, [msg], [chips(opts)]);
   }
 
@@ -355,6 +364,27 @@ async function discover(s: SessionRow, inp: ChatIn, history: Msg[]): Promise<Cha
   return out(s, [reply]);
 }
 
+/** Run the confirmed track's opener, then feed the SAME message through the
+ * flow when it already carries substance ("yes — it's a vacuum cleaner…"),
+ * so nobody is asked to repeat what they just said. */
+async function confirmAndCarry(
+  s: SessionRow,
+  track: Track,
+  text: string,
+  history: Msg[],
+): Promise<ChatOut> {
+  const first = await setTrack(s, track);
+  if (s.state === "ODM_SLOTS" && text.trim().split(/\s+/).length > 4) {
+    const follow = await odmSlots(s, { session_id: s.id, kind: "text", text }, history);
+    return {
+      ...follow,
+      messages: [...first.messages, ...follow.messages],
+      widgets: follow.widgets.length ? follow.widgets : first.widgets,
+    };
+  }
+  return first;
+}
+
 async function trackConfirm(s: SessionRow, inp: ChatIn, history: Msg[]): Promise<ChatOut> {
   if (inp.kind === "chip") {
     if (inp.chip_id === "confirm:yes" && s.data.proposed_track) {
@@ -366,6 +396,30 @@ async function trackConfirm(s: SessionRow, inp: ChatIn, history: Msg[]): Promise
     }
   }
   if (inp.kind === "text" && inp.text) {
+    const text = inp.text;
+    const proposed = s.data.proposed_track as Track | undefined;
+    // A typed/spoken "yes" must work exactly like tapping the chip — voice
+    // cannot tap chips, and looping "Have I got that right?" kills intakes.
+    const affirmed =
+      /^\s*(yes|yeah|yep|ya|sure|correct|right|haan?|ji|ok(ay)?|theek|bilkul|go ahead|proceed|start|chalo)\b/i.test(
+        text,
+      ) || /that'?s (right|correct)|got (that|it) right|sounds (right|good)/i.test(text);
+    if (proposed && affirmed) return confirmAndCarry(s, proposed, text, history);
+    if (proposed) {
+      const t = await llm.triage(history, text);
+      if (t.track === "QUESTION") {
+        const ans = await llm.answerQuestion(history, text);
+        const others = TRACK_CHIPS.slice(0, 3).filter((c) => c.id !== `track:${proposed}`);
+        return out(s, [ans], [chips([{ id: "confirm:yes", label: "Yes, that's right" }, ...others])]);
+      }
+      if (t.track === proposed || t.track === "UNCLEAR") {
+        // Describing the product for the proposed track IS confirmation.
+        return confirmAndCarry(s, proposed, text, history);
+      }
+      if (t.track === "ODM" || t.track === "EMS" || t.track === "PRODUCT") {
+        return confirmAndCarry(s, t.track, text, history); // corrected in words
+      }
+    }
     s.state = "DISCOVER";
     return discover(s, inp, history);
   }
@@ -708,6 +762,51 @@ function reviewChips() {
   ];
 }
 
+const LLD_REVIEW_CHIPS = [
+  { id: "lld:accept", label: "Looks right — file it" },
+  { id: "lld:regen", label: "Regenerate with more depth" },
+];
+
+/** Iterative LLD editing: revise on feedback, file on approval. */
+async function odmLldReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
+  const db = getDb();
+  if (inp.kind === "chip" && inp.chip_id === "lld:accept") return finalize(s);
+  const feedback =
+    inp.kind === "text" && inp.text
+      ? inp.text
+      : inp.kind === "chip" && inp.chip_id === "lld:regen"
+        ? "Regenerate the draft from scratch with substantially more engineering depth in every section."
+        : null;
+  if (feedback) {
+    const prior = s.data.lld_path ? await db.getObject(s.data.lld_path) : null;
+    const priorMd = prior ? new TextDecoder().decode(prior) : "";
+    const transcript = await db.recentMessages(s.id, 40);
+    const lldMd = await llm.generateLld(
+      s.data.slots,
+      s.data.contact,
+      s.data.lead_ref ?? "XOR",
+      transcript,
+      { prior: priorMd, feedback },
+    );
+    const fname = s.data.lld_file ?? `LLD-draft-${s.data.lead_ref}.md`;
+    const path = s.data.lld_path ?? `${s.id}/generated/${fname}`;
+    await db.putObject(path, new TextEncoder().encode(lldMd), "text/markdown");
+    s.data.lld_file = fname;
+    s.data.lld_path = path;
+    return out(
+      s,
+      ["Rewritten with your changes. Take another look — more edits, or shall I file it?"],
+      [
+        card("LLD draft (revised)", fname, [
+          { label: "Open the revised LLD", url: `/api/download/${s.id}/${encodeURIComponent(fname)}` },
+        ]),
+        chips(LLD_REVIEW_CHIPS),
+      ],
+    );
+  }
+  return resume(s);
+}
+
 async function odmReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
   const db = getDb();
   if (inp.kind === "chip") {
@@ -725,7 +824,23 @@ async function odmReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
       await db.putObject(path, new TextEncoder().encode(lldMd), "text/markdown");
       s.data.lld_file = fname;
       s.data.lld_path = path;
-      return finalize(s);
+      // The draft is EDITABLE — iterate with the customer until it reads
+      // right, exactly like working a doc in Claude; only then file it.
+      s.state = "ODM_LLD_REVIEW";
+      return out(
+        s,
+        [
+          "Here's your LLD draft — open it below. Read it over and tell me " +
+            "what to change (any section, any depth) and I'll rewrite it. " +
+            "When it reads right, file it.",
+        ],
+        [
+          card("LLD draft", fname, [
+            { label: "Open the LLD draft", url: `/api/download/${s.id}/${encodeURIComponent(fname)}` },
+          ]),
+          chips(LLD_REVIEW_CHIPS),
+        ],
+      );
     }
     if (inp.chip_id === "lld:skip") {
       return finalize(s);
@@ -1269,6 +1384,8 @@ function resumeWidget(s: SessionRow): Widget | null {
       return form("product_details", "What you need", PRODUCT_DETAILS_FORM, "Submit enquiry");
     case "ODM_REVIEW":
       return chips(reviewChips());
+    case "ODM_LLD_REVIEW":
+      return chips(LLD_REVIEW_CHIPS);
     case "DONE":
       return chips([{ id: "restart", label: "Start another enquiry" }]);
     default:
@@ -1285,6 +1402,7 @@ async function resume(s: SessionRow): Promise<ChatOut> {
     CLIENT_ORGSIZE: "And the organisation size?",
     ODM_SLOTS: resumeOdmQuestion(s),
     ODM_REVIEW: "Ready to generate the LLD draft, or change an answer?",
+    ODM_LLD_REVIEW: "Your LLD draft is ready — tell me what to change, or file it as is.",
     EMS_CHECKLIST: "Whenever you're ready with the next file.",
     EMS_DETAILS: "Just the build details left.",
     PRODUCT_CATEGORY: "Pick the closest category.",

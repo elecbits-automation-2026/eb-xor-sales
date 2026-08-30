@@ -14,6 +14,7 @@ export type SessionState =
   | "CLIENT_ORGSIZE"
   | "ODM_SLOTS"
   | "ODM_REVIEW"
+  | "ODM_LLD_REVIEW"
   | "EMS_CHECKLIST"
   | "EMS_DETAILS"
   | "PRODUCT_CATEGORY"

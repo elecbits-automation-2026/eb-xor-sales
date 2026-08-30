@@ -157,6 +157,9 @@ describe("ODM flow", () => {
     expect(cur.widgets.some((w: Widget) => w.type === "card")).toBe(true);
 
     cur = await chat({ session_id: sid, kind: "chip", chip_id: "lld:generate" });
+    // The draft is now reviewable/editable before filing.
+    expect(cur.meta.state).toBe("ODM_LLD_REVIEW");
+    cur = await chat({ session_id: sid, kind: "chip", chip_id: "lld:accept" });
     expect(cur.meta.state).toBe("DONE");
 
     const links = cur.widgets
