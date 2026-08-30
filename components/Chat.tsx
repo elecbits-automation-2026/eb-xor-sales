@@ -480,9 +480,33 @@ export default function Chat() {
     [addMsg, freezeAll, post],
   );
 
+  /** Hard-stop any active recognition NOW — clears the ref immediately so a
+   *  missed onend can never wedge the mic ("can't click again"), and marks
+   *  the run cancelled so its buffered words are never sent. */
+  const stopListening = useCallback(() => {
+    const rec = recRef.current;
+    recRef.current = null;
+    if (rec) {
+      (rec as { _cancelled?: boolean })._cancelled = true;
+      try {
+        rec.stop();
+      } catch {
+        // already stopped
+      }
+    }
+    setHearing(false);
+  }, []);
+
   /** One utterance: listen until the visitor pauses, then send what was heard. */
   const listenOnce = useCallback(() => {
     if (!voiceRef.current || busyRef.current || recRef.current) return;
+    // NEVER open the ear while XoR is talking — the mic would transcribe
+    // the bot's own voice from the speakers. speak()'s onend re-arms us.
+    try {
+      if (window.speechSynthesis?.speaking) return;
+    } catch {
+      // no synthesis — fine, listen away
+    }
     const Ctor = speechCtor();
     if (!Ctor) return;
     const rec = new Ctor();
@@ -501,10 +525,13 @@ export default function Chat() {
       if (ev.error === "not-allowed" || ev.error === "audio-capture") fatal = true;
     };
     rec.onend = () => {
-      recRef.current = null;
+      if (recRef.current === rec) recRef.current = null;
       setHearing(false);
       const text = heard.trim();
       setDraft("");
+      // A cancelled run (bot started speaking / mic toggled off) must not
+      // send what it half-heard, nor re-open the ear.
+      if ((rec as { _cancelled?: boolean })._cancelled) return;
       if (fatal || !voiceRef.current) {
         if (fatal) {
           voiceRef.current = false;
@@ -545,6 +572,9 @@ export default function Chat() {
           listenOnce();
           return;
         }
+        // The bot is about to talk — close the ear first so the mic never
+        // hears the reply through the speakers.
+        stopListening();
         synth.cancel();
         // Bullets and markdown read terribly aloud — speak plain prose.
         const spoken = text.replace(/^[\s]*[-•*]\s+/gm, "").replace(/[*_#`]/g, "");
@@ -564,7 +594,7 @@ export default function Chat() {
         if (voiceRef.current) listenOnce();
       }
     },
-    [listenOnce],
+    [listenOnce, stopListening],
   );
   useEffect(() => {
     speakRef.current = speak;
@@ -574,8 +604,7 @@ export default function Chat() {
     if (voiceOn) {
       voiceRef.current = false;
       setVoiceOn(false);
-      setHearing(false);
-      recRef.current?.stop();
+      stopListening();
       try {
         window.speechSynthesis?.cancel();
       } catch {
@@ -585,6 +614,7 @@ export default function Chat() {
     }
     voiceRef.current = true;
     setVoiceOn(true);
+    stopListening(); // clear any wedged recognizer before a fresh start
     listenOnce();
   };
 
