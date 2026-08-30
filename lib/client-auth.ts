@@ -1,11 +1,13 @@
 /**
  * lib/client-auth.ts — browser-side auth facade for the client account.
  *
- * One API over two backends, chosen by env at build time:
- *  - "supabase": NEXT_PUBLIC_SUPABASE_URL + NEXT_PUBLIC_SUPABASE_ANON_KEY are
- *    set → @supabase/supabase-js runs in the browser for AUTH ONLY (data
- *    always goes through our API routes with the session's bearer token).
- *  - "demo": no env → POST /api/mock-auth; the opaque token persists in
+ * One API over two backends, chosen at RUNTIME by GET /api/config (so the
+ * deployment needs no NEXT_PUBLIC_ build-time vars — plain SUPABASE_URL /
+ * SUPABASE_ANON_KEY on the server are enough):
+ *  - "supabase": /api/config returns a url + anon key → @supabase/supabase-js
+ *    runs in the browser for AUTH ONLY (data always goes through our API
+ *    routes with the session's bearer token).
+ *  - "demo": config empty → POST /api/mock-auth; the opaque token persists in
  *    localStorage("xor_demo_token") and no email flows exist.
  *
  * Every failure throws an Error whose .message is safe to show to the user.
@@ -23,26 +25,49 @@ export interface AuthUser {
 const DEMO_TOKEN_KEY = "xor_demo_token";
 const DEMO_USER_KEY = "xor_demo_user"; // companion record so currentUser() works offline
 
-/**
- * Which backend this build talks to. The env vars MUST stay written out
- * literally — Next.js inlines `process.env.NEXT_PUBLIC_*` by exact text.
- */
-export function authMode(): "supabase" | "demo" {
-  return process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-    ? "supabase"
-    : "demo";
+// ── runtime config (fetched once; a failed fetch retries on the next call
+//    instead of silently locking a production visitor into demo mode) ──────
+interface ClientCfg {
+  url: string | null;
+  anonKey: string | null;
+}
+
+let cfgPromise: Promise<ClientCfg> | null = null;
+
+function clientCfg(): Promise<ClientCfg> {
+  if (!cfgPromise) {
+    cfgPromise = fetch("/api/config")
+      .then((r) => {
+        if (!r.ok) throw new Error(`config ${r.status}`);
+        return r.json() as Promise<{
+          supabase_url?: string | null;
+          supabase_anon_key?: string | null;
+        }>;
+      })
+      .then((b) => ({ url: b.supabase_url ?? null, anonKey: b.supabase_anon_key ?? null }))
+      .catch(() => {
+        cfgPromise = null; // transient — try again on the next call
+        return { url: null, anonKey: null };
+      });
+  }
+  return cfgPromise;
+}
+
+/** Which backend this deployment talks to (resolved from /api/config). */
+export async function authMode(): Promise<"supabase" | "demo"> {
+  const c = await clientCfg();
+  return c.url && c.anonKey ? "supabase" : "demo";
 }
 
 // ── supabase singleton (only ever constructed in supabase mode) ───────────
 let client: SupabaseClient | null = null;
 
-function sb(): SupabaseClient {
+async function sb(): Promise<SupabaseClient> {
   if (!client) {
-    client = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
-      { auth: { persistSession: true, autoRefreshToken: true } },
-    );
+    const c = await clientCfg();
+    client = createClient(c.url || "", c.anonKey || "", {
+      auth: { persistSession: true, autoRefreshToken: true },
+    });
   }
   return client;
 }
@@ -146,8 +171,8 @@ export async function signUp(i: {
   email: string;
   password: string;
 }): Promise<{ needsEmailConfirm: boolean }> {
-  if (authMode() === "supabase") {
-    const { data, error } = await sb().auth.signUp({
+  if ((await authMode()) === "supabase") {
+    const { data, error } = await (await sb()).auth.signUp({
       email: i.email,
       password: i.password,
       options: { data: { name: i.name, company: i.company ?? "" } },
@@ -173,8 +198,8 @@ export async function signUp(i: {
  * back on /account. Demo mode: not available; throws a friendly notice.
  */
 export async function signInWithGoogle(): Promise<void> {
-  if (authMode() === "supabase") {
-    const { error } = await sb().auth.signInWithOAuth({
+  if ((await authMode()) === "supabase") {
+    const { error } = await (await sb()).auth.signInWithOAuth({
       provider: "google",
       options: { redirectTo: window.location.origin + "/account" },
     });
@@ -185,8 +210,8 @@ export async function signInWithGoogle(): Promise<void> {
 }
 
 export async function signIn(email: string, password: string): Promise<void> {
-  if (authMode() === "supabase") {
-    const { error } = await sb().auth.signInWithPassword({ email, password });
+  if ((await authMode()) === "supabase") {
+    const { error } = await (await sb()).auth.signInWithPassword({ email, password });
     if (error) throw new Error(friendly(error.message));
     return;
   }
@@ -195,8 +220,8 @@ export async function signIn(email: string, password: string): Promise<void> {
 }
 
 export async function signOut(): Promise<void> {
-  if (authMode() === "supabase") {
-    await sb().auth.signOut();
+  if ((await authMode()) === "supabase") {
+    await (await sb()).auth.signOut();
     return;
   }
   clearDemo();
@@ -204,29 +229,29 @@ export async function signOut(): Promise<void> {
 
 /** Supabase mode only — emails a link that lands back on /account. */
 export async function resetPassword(email: string): Promise<void> {
-  if (authMode() !== "supabase") {
+  if ((await authMode()) !== "supabase") {
     throw new Error("Password reset isn't available in demo mode.");
   }
   const redirectTo =
     typeof window !== "undefined" ? `${window.location.origin}/account` : undefined;
-  const { error } = await sb().auth.resetPasswordForEmail(email, { redirectTo });
+  const { error } = await (await sb()).auth.resetPasswordForEmail(email, { redirectTo });
   if (error) throw new Error(friendly(error.message));
 }
 
 /** Supabase mode only — sets a new password on the recovery session. */
 export async function setPassword(password: string): Promise<void> {
-  if (authMode() !== "supabase") {
+  if ((await authMode()) !== "supabase") {
     throw new Error("Password reset isn't available in demo mode.");
   }
-  const { error } = await sb().auth.updateUser({ password });
+  const { error } = await (await sb()).auth.updateUser({ password });
   if (error) throw new Error(friendly(error.message));
 }
 
 /** Bearer token for API calls, or null when signed out. Never throws. */
 export async function getAccessToken(): Promise<string | null> {
-  if (authMode() === "supabase") {
+  if ((await authMode()) === "supabase") {
     try {
-      const { data } = await sb().auth.getSession();
+      const { data } = await (await sb()).auth.getSession();
       return data.session?.access_token ?? null;
     } catch {
       return null;
@@ -236,9 +261,9 @@ export async function getAccessToken(): Promise<string | null> {
 }
 
 export async function currentUser(): Promise<AuthUser | null> {
-  if (authMode() === "supabase") {
+  if ((await authMode()) === "supabase") {
     try {
-      const { data } = await sb().auth.getSession();
+      const { data } = await (await sb()).auth.getSession();
       return userFromSession(data.session);
     } catch {
       return null;
@@ -254,20 +279,35 @@ export async function currentUser(): Promise<AuthUser | null> {
  * "SIGNED_IN" / "SIGNED_OUT".
  */
 export function onAuthChange(cb: (user: AuthUser | null, event: string) => void): () => void {
-  if (authMode() === "supabase") {
-    const { data } = sb().auth.onAuthStateChange((event, session) => {
-      cb(userFromSession(session), event);
-    });
-    return () => data.subscription.unsubscribe();
-  }
-  if (typeof window === "undefined") return () => undefined;
-  const onStorage = (e: StorageEvent) => {
-    if (e.key !== null && e.key !== DEMO_TOKEN_KEY) return; // null = storage.clear()
-    const user = demoUser();
-    cb(user, user ? "SIGNED_IN" : "SIGNED_OUT");
+  // The mode is resolved asynchronously (runtime config), so the actual
+  // subscription attaches once it's known; the returned unsubscriber works
+  // whether it fires before or after that happens.
+  let disposed = false;
+  let cleanup: () => void = () => undefined;
+  void (async () => {
+    if ((await authMode()) === "supabase") {
+      if (disposed) return;
+      const { data } = (await sb()).auth.onAuthStateChange((event, session) => {
+        cb(userFromSession(session), event);
+      });
+      cleanup = () => data.subscription.unsubscribe();
+      if (disposed) cleanup();
+      return;
+    }
+    if (typeof window === "undefined" || disposed) return;
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== null && e.key !== DEMO_TOKEN_KEY) return; // null = storage.clear()
+      const user = demoUser();
+      cb(user, user ? "SIGNED_IN" : "SIGNED_OUT");
+    };
+    window.addEventListener("storage", onStorage);
+    cleanup = () => window.removeEventListener("storage", onStorage);
+    if (disposed) cleanup();
+  })();
+  return () => {
+    disposed = true;
+    cleanup();
   };
-  window.addEventListener("storage", onStorage);
-  return () => window.removeEventListener("storage", onStorage);
 }
 
 /*

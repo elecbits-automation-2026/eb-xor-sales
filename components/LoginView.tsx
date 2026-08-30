@@ -132,8 +132,20 @@ function clearChatSession() {
 
 export default function LoginView({ gate }: { gate: AuthGate }) {
   const uid = useId();
-  const demo = authMode() === "demo";
   const { notice, setNotice } = gate;
+  // Backend mode arrives from /api/config; until then assume production
+  // (the only thing gated on it is the demo-hidden "Forgot password?" link).
+  const [demo, setDemo] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      const m = await authMode();
+      if (alive) setDemo(m === "demo");
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const [view, setView] = useState<CardView>({ v: "auth" });
   const [mode, setMode] = useState<"signin" | "signup">("signin");

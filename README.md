@@ -81,8 +81,10 @@ Clients can sign up / sign in and see **their enquiries** at `/account`
    keep **Confirm email ON** — unconfirmed signups must never unlock an
    enquiry list. Set Site URL (Authentication → URL Configuration) to your
    domain so confirmation/reset links land on `/account`.
-3. Add `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` to
-   Vercel env (the browser uses them for auth only; RLS stays deny-all).
+3. Add `SUPABASE_ANON_KEY` to Vercel env (plain name — the browser fetches
+   the url + anon key from `/api/config` at runtime, so no `NEXT_PUBLIC_`
+   build-time vars are needed; the anon key is auth-only and RLS stays
+   deny-all. Legacy `NEXT_PUBLIC_*` names are still honored if present).
 4. **Google sign-in:** Supabase Dashboard → Authentication → Providers →
    **Google** — paste a Google OAuth client ID/secret from
    console.cloud.google.com → Credentials, with the authorized redirect URI
