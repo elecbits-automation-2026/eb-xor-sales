@@ -341,7 +341,9 @@ export async function driveHandoff(p: DriveHandoffPayload): Promise<DriveResult>
         intakeId,
         p.lld.filename,
         bytes,
-        "text/markdown",
+        p.lld.filename.endsWith(".docx")
+          ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          : "text/markdown",
       );
     }
   }
