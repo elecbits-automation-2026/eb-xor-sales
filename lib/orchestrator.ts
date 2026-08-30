@@ -50,9 +50,9 @@ const TRACK_CHIPS = [
 ];
 
 const GREETING =
-  "Namaste, I'm XOR Assist. Tell me what you're building — or pick the " +
-  "closest fit below — and I'll route you to the right Elecbits team with " +
-  "everything they need to move fast.";
+  "Namaste — I'm XoR from Elecbits. Tell me what you're building, or pick " +
+  "the closest fit below, and I'll capture your requirement exactly the " +
+  "way our engineering team needs it to move fast.";
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
