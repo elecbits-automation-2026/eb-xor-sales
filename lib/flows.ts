@@ -102,6 +102,21 @@ export const EMS_CHECKLIST: ChecklistItemDef[] = [
   },
 ];
 
+/**
+ * Free-form attachment slot for the composer paperclip / pasted screenshots —
+ * valid at ANY point in the chat. Deliberately NOT part of EMS_CHECKLIST so it
+ * never appears in (or advances) the build-package state machine.
+ */
+export const ATTACHMENT_ITEM: ChecklistItemDef = {
+  key: "attachment",
+  label: "Attachment",
+  accept:
+    ".png,.jpg,.jpeg,.webp,.gif,.heic,.pdf,.zip,.rar,.7z,.xlsx,.xls,.csv," +
+    ".docx,.doc,.step,.stp,.txt,.md",
+  required: false,
+  desc: "Any supporting file — image, document, archive, CAD.",
+};
+
 export const EMS_DETAILS_FORM: FormField[] = [
   {
     key: "quantity",

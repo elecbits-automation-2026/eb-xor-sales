@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { bucket, cfg } from "@/lib/config";
-import { checkExtension, EMS_CHECKLIST } from "@/lib/flows";
+import { ATTACHMENT_ITEM, checkExtension, EMS_CHECKLIST } from "@/lib/flows";
 import { clientKey, rateLimitOk } from "@/lib/ratelimit";
 import { getDb } from "@/lib/supabase";
 import { sanitizeFilename } from "@/lib/util";
@@ -24,7 +24,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ detail: "invalid JSON" }, { status: 400 });
   }
 
-  const item = EMS_CHECKLIST.find((i) => i.key === body.item_key);
+  // "attachment" is the ad-hoc slot (paperclip / paste), valid in any state.
+  const item =
+    body.item_key === ATTACHMENT_ITEM.key
+      ? ATTACHMENT_ITEM
+      : EMS_CHECKLIST.find((i) => i.key === body.item_key);
   if (!item) {
     return NextResponse.json({ detail: "unknown checklist item" }, { status: 400 });
   }
