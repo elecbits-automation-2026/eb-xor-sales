@@ -151,6 +151,33 @@ async function uploadBytes(
   return id;
 }
 
+/**
+ * Prove the acting identity can create FILE CONTENT (not just folders) in
+ * the accounts tree. This is exactly where a service account writing into a
+ * personal My Drive dies: folders are 0-byte and succeed, anything carrying
+ * bytes is refused (no storage quota of its own) — so the register fills and
+ * folders appear while every upload "mysteriously" fails. Creates + deletes
+ * a tiny probe file; returns null on success or the verbatim Google error.
+ */
+export async function driveWriteProbe(): Promise<string | null> {
+  const { resolveAccountsFolder } = await import("./gtargets");
+  const parent = (await resolveAccountsFolder()).id;
+  try {
+    const id = await uploadBytes(
+      parent,
+      "xor-write-probe.txt",
+      Buffer.from("XOR write probe — safe to delete", "utf-8"),
+      "text/plain",
+    );
+    await drive()
+      .files.delete({ fileId: id, supportsAllDrives: true })
+      .catch(() => undefined);
+    return null;
+  } catch (err) {
+    return String(err).slice(0, 500);
+  }
+}
+
 export interface HandoffFileRef {
   storage_path: string;
   filename: string;

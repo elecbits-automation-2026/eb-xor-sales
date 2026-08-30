@@ -20,6 +20,10 @@ const TTL_MS = 60 * 60 * 1000; // refetch at most hourly
 const PER_DOC_CHARS = 5000;
 const TOTAL_CHARS = 60000;
 const MAX_DOCS = 18; // extraction time guard (health route has 30s)
+// A cold crawl (searches + up to 18 exports, PDFs included) can outlive a
+// serverless chat turn — cache a PARTIAL brain rather than time the turn out;
+// the hourly refresh keeps topping it up.
+const TIME_BUDGET_MS = 20_000;
 
 /** The text-bearing types exportKbFileText can extract. */
 const TEXT_MIMES = [
@@ -69,9 +73,14 @@ async function fetchBrainText(): Promise<string> {
     })
     .slice(0, MAX_DOCS);
 
+  const started = Date.now();
   let out = "";
   for (const f of docs) {
     if (out.length >= TOTAL_CHARS) break;
+    if (Date.now() - started > TIME_BUDGET_MS) {
+      console.warn("xor brain: crawl time budget hit — caching a partial brain");
+      break;
+    }
     const src: KbSourceFile = {
       id: f.id,
       name: f.name,

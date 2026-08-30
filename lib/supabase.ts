@@ -68,6 +68,8 @@ export interface ClientRow {
   auth_user_id: string | null;
   drive_folder_id: string | null;
   drive_folder_url: string | null;
+  /** Elecbits sales agent chosen at signup (from core.people). */
+  sales_agent?: string | null;
 }
 
 export interface LeadFileRow {
@@ -180,6 +182,13 @@ export interface Db {
   // Settings — small key/value store (e.g. cached Google bindings)
   getSetting(key: string): Promise<string | null>;
   setSetting(key: string, value: string): Promise<void>;
+
+  /**
+   * Sales-designated people from the shared project's core.people (the PMS
+   * ecosystem's people table), for the signup dropdown. Best-effort: any
+   * error (schema not exposed, table absent, memory driver) returns [].
+   */
+  salesAgents(): Promise<string[]>;
 
   // Background tasks (the activity column on the chat page)
   insertTask(
@@ -468,6 +477,29 @@ class SupabaseDb implements Db {
       .maybeSingle();
     if (error) throw new Error(`supabase: ${error.message}`);
     return (data as { value: string } | null)?.value ?? null;
+  }
+
+  async salesAgents(): Promise<string[]> {
+    try {
+      // core.people's exact columns belong to the PMS apps — select * and
+      // filter defensively here rather than betting on names in the query.
+      const { data, error } = await this.client.schema("core").from("people").select("*").limit(300);
+      if (error || !Array.isArray(data)) return [];
+      const looksSales = (v: unknown) => typeof v === "string" && /sales/i.test(v);
+      const nameOf = (r: Record<string, unknown>) =>
+        [r.full_name, r.name, r.display_name, r.person_name]
+          .find((v) => typeof v === "string" && (v as string).trim()) as string | undefined;
+      const agents = (data as Record<string, unknown>[])
+        .filter((r) =>
+          [r.designation, r.department, r.role, r.team, r.function].some(looksSales),
+        )
+        .map(nameOf)
+        .filter((n): n is string => Boolean(n));
+      return [...new Set(agents)].sort();
+    } catch (err) {
+      console.error("core.people sales-agent lookup failed:", err);
+      return [];
+    }
   }
 
   async setSetting(key: string, value: string): Promise<void> {
@@ -841,6 +873,10 @@ class MemoryDb implements Db {
 
   async getSetting(key: string): Promise<string | null> {
     return this.s.settings.get(key) ?? null;
+  }
+
+  async salesAgents(): Promise<string[]> {
+    return []; // no core.people in the memory driver — dropdown hides itself
   }
 
   async setSetting(key: string, value: string): Promise<void> {

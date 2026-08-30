@@ -130,6 +130,8 @@ export async function handle(inp: ChatIn, authUser?: AuthUser | null): Promise<C
   if (authUser && s.data.auth_user_id !== authUser.id) {
     s.data.auth_user_id = authUser.id;
     s.data.auth_email = authUser.email;
+    s.data.auth_name = authUser.name || null;
+    s.data.sales_agent = authUser.sales_agent ?? null;
   }
 
   if (inp.kind === "open") {
@@ -406,11 +408,26 @@ async function setTrack(s: SessionRow, track: Track): Promise<ChatOut> {
       "Let's find you the right product. Quick coordinates first so the " +
       "team can follow up with the catalogue and pricing.",
   }[track];
-  return out(s, [intro], [form("contact", "How do we reach you?", CONTACT_FORM, "Save & continue")]);
+  return out(s, [intro], [contactFormFor(s)]);
+}
+
+/**
+ * The contact form, prefilled with whatever the login already told us —
+ * a signed-in visitor never re-types their own name and email.
+ */
+function contactFormFor(s: SessionRow): Widget {
+  const known: Record<string, string | undefined> = {
+    name: s.data.contact.name || s.data.auth_name || undefined,
+    email: s.data.contact.email || s.data.auth_email || undefined,
+    company: s.data.contact.company || undefined,
+    phone: s.data.contact.phone || undefined,
+  };
+  const fields = CONTACT_FORM.map((f) => (known[f.key] ? { ...f, value: known[f.key] } : f));
+  return form("contact", "How do we reach you?", fields, "Save & continue");
 }
 
 async function contact(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
-  const contactForm = form("contact", "How do we reach you?", CONTACT_FORM, "Save & continue");
+  const contactForm = contactFormFor(s);
   if (inp.kind !== "form" || inp.form?.form_id !== "contact") {
     return out(s, ["The quickest way is the little form below — takes ten seconds."], [contactForm]);
   }
@@ -495,19 +512,41 @@ async function clientOrgsize(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
  */
 async function establishAccount(s: SessionRow): Promise<string> {
   const d = s.data;
+  const provisional = `${TRACK_LABELS[s.track ?? "UNKNOWN"] ?? "Enquiry"} — ${
+    d.contact.company ?? ""
+  }`.slice(0, 80);
   try {
     const client = await resolveClient(s);
     if (!d.deal_id) {
       const { register } = await import("./register");
-      const provisional = `${TRACK_LABELS[s.track ?? "UNKNOWN"] ?? "Enquiry"} — ${
-        d.contact.company ?? ""
-      }`.slice(0, 80);
       d.deal_id = await trackTask(
         s.id,
         "Register deal",
         () => register().issueDeal(client.client_code, provisional),
         { detail: (id) => id },
       );
+    }
+    // The enquiry appears under "Your projects" (with its date) the moment
+    // the deal exists — not only after finalize, which upgrades the
+    // provisional summary to the real one-liner and attaches the files.
+    if (!d.lead_id) {
+      const db = getDb();
+      if (!d.lead_ref) d.lead_ref = await db.nextLeadRef();
+      const lead = await db.insertLead({
+        lead_ref: d.lead_ref,
+        session_id: s.id,
+        track: s.track ?? "UNKNOWN",
+        company: d.contact.company ?? "",
+        contact_name: d.contact.name ?? "",
+        email: d.contact.email ?? "",
+        phone: d.contact.phone ?? "",
+        summary: provisional,
+        quantity: "",
+        timeline: "",
+        client_id: client.id,
+        deal_id: d.deal_id ?? null,
+      });
+      d.lead_id = lead.id;
     }
     if (cfg.mockDrive) {
       await noteTask(s.id, "Create Drive workspace", "completed", "demo mode — logged, not sent");
@@ -542,7 +581,10 @@ async function establishAccount(s: SessionRow): Promise<string> {
     return d.deal_id ? `Filed as ${d.deal_id}. ` : "";
   } catch (err) {
     console.error(`early account establish failed session=${s.id}`, err);
-    return ""; // finalize catches up — nothing here may block the visitor
+    // Nothing here may block the visitor — but the failure must be VISIBLE
+    // in the tasks panel, never silent; finalize re-runs whatever is missing.
+    await noteTask(s.id, "Account setup", "failed", "recovering automatically at handoff");
+    return "";
   }
 }
 
@@ -835,6 +877,10 @@ async function resolveClient(s: SessionRow): Promise<ClientRow> {
       await db.updateClient(client.id, { auth_user_id: d.auth_user_id });
       client = { ...client, auth_user_id: d.auth_user_id };
     }
+    if (d.sales_agent && !client.sales_agent) {
+      await db.updateClient(client.id, { sales_agent: d.sales_agent });
+      client = { ...client, sales_agent: d.sales_agent };
+    }
   } else {
     const { register } = await import("./register");
     client = await trackTask(
@@ -858,6 +904,7 @@ async function resolveClient(s: SessionRow): Promise<ClientRow> {
           auth_user_id: d.auth_user_id,
           drive_folder_id: null,
           drive_folder_url: null,
+          sales_agent: d.sales_agent ?? null,
         });
       },
       { detail: (c) => c.client_code },
@@ -916,6 +963,11 @@ async function finalizeWork(s: SessionRow): Promise<ChatOut> {
     });
     leadId = lead.id;
     d.lead_id = leadId;
+    await db.linkLeadFiles(s.id, leadId);
+  } else {
+    // Lead row created early (at establish) with a provisional summary —
+    // upgrade it to the captured requirement and attach staged files.
+    await db.updateLead(leadId, { summary, quantity, timeline });
     await db.linkLeadFiles(s.id, leadId);
   }
 
@@ -1171,7 +1223,7 @@ function resumeWidget(s: SessionRow): Widget | null {
       return chips([{ id: "confirm:yes", label: "Yes, that's right" }, ...others]);
     }
     case "CONTACT":
-      return form("contact", "How do we reach you?", CONTACT_FORM, "Save & continue");
+      return contactFormFor(s);
     case "CLIENT_INDUSTRY":
       return industryChips();
     case "CLIENT_ORGSIZE":

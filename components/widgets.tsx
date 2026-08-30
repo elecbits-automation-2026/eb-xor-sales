@@ -91,7 +91,11 @@ export function FormW({
   onSubmit: (formId: string, values: Record<string, string>, summary: string) => void;
 }) {
   const uid = useId();
-  const [values, setValues] = useState<Record<string, string>>({});
+  const [values, setValues] = useState<Record<string, string>>(() => {
+    const seed: Record<string, string> = {};
+    for (const f of w.fields) if (f.value) seed[f.key] = f.value;
+    return seed;
+  });
 
   const set = (key: string, v: string) => setValues((prev) => ({ ...prev, [key]: v }));
 

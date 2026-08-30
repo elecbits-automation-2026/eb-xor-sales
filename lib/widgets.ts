@@ -45,6 +45,8 @@ export interface FormField {
   input: "text" | "email" | "tel" | "textarea";
   required: boolean;
   placeholder: string;
+  /** Prefilled value (e.g. the signed-in user's name/email) — editable. */
+  value?: string;
 }
 
 export interface ChecklistItemDef {
@@ -100,6 +102,8 @@ export interface SessionData {
   org_size: string | null; // register Lists org size (new clients)
   auth_user_id: string | null; // verified login attached to this session
   auth_email: string | null; // verified email of that login
+  auth_name?: string | null; // display name of that login
+  sales_agent?: string | null; // Elecbits contact chosen at signup
   lld_file: string | null; // filename served for download
   lld_path: string | null; // storage path of the generated LLD
   drive: { folder_id?: string; folder_url?: string };
