@@ -62,7 +62,7 @@ phase. Volumes: ${g("target_qty")}.
 - References provided: ${g("references")}
 
 ## 10. Suggested Next Steps
-1. Architecture & scoping call with an Elecbits sales engineer.
+1. Architecture & scoping call with an Elecbits engineer.
 2. Firm up FR list and certification plan.
 3. Proposal with milestones for prototype → pilot → production (${g("timeline")}).
 `;

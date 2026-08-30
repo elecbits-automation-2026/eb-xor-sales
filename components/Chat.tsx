@@ -26,6 +26,28 @@ import {
 
 import { getAccessToken } from "@/lib/client-auth";
 import { ATTACHMENT_ITEM } from "@/lib/flows";
+
+// Minimal Web Speech API surface (not in TS's DOM lib; Chrome/Edge/Safari
+// expose it, mostly under the webkit prefix).
+interface SpeechRec {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  onresult: ((ev: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+  onend: (() => void) | null;
+  onerror: ((ev: { error?: string }) => void) | null;
+  start(): void;
+  stop(): void;
+}
+
+function speechCtor(): (new () => SpeechRec) | null {
+  if (typeof window === "undefined") return null;
+  const w = window as unknown as {
+    SpeechRecognition?: new () => SpeechRec;
+    webkitSpeechRecognition?: new () => SpeechRec;
+  };
+  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
+}
 import type { ChatIn, ChatOut, ChecklistItemDef, SessionState, Widget } from "@/lib/widgets";
 import { WidgetView } from "./widgets";
 
@@ -78,6 +100,10 @@ export default function Chat() {
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const attachRef = useRef<HTMLInputElement>(null);
+  // Voice conversation loop (speak → send → reply spoken → listen again).
+  const voiceRef = useRef(false);
+  const speakRef = useRef<((text: string) => void) | null>(null);
+  const listenRef = useRef<() => void>(() => undefined);
 
   // ── transcript helpers ──────────────────────────────────────────────────
   const addMsg = useCallback((text: string, who: Who) => {
@@ -108,6 +134,10 @@ export default function Chat() {
       additions.push({ id: ++idRef.current, kind: "widgets", widgets: res.widgets, frozen: false });
     }
     if (additions.length) setEntries((es) => [...es, ...additions]);
+    // Voice mode: the reply is read aloud; when it finishes, listening resumes.
+    if (voiceRef.current && res.messages.length) {
+      speakRef.current?.(res.messages.join(" "));
+    }
 
     setUiState(res.meta.state);
     const label = STATE_LABELS[res.meta.state] ?? "online";
@@ -361,6 +391,141 @@ export default function Chat() {
     sendAttachment(file);
   };
 
+  // ── voice conversation (Web Speech API: hear the visitor, speak back,
+  //    listen again — a real back-and-forth; no backend, no keys) ─────────
+  const recRef = useRef<SpeechRec | null>(null);
+  const [micOk, setMicOk] = useState(false);
+  const [voiceOn, setVoiceOn] = useState(false);
+  const [hearing, setHearing] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    // async so the lint-guarded "no sync setState in effect" holds; also
+    // avoids an SSR/client hydration mismatch on the button.
+    void Promise.resolve().then(() => {
+      if (alive) setMicOk(Boolean(speechCtor()));
+    });
+    return () => {
+      alive = false;
+      voiceRef.current = false;
+      recRef.current?.stop();
+      try {
+        window.speechSynthesis?.cancel();
+      } catch {
+        // no synthesis on this browser
+      }
+    };
+  }, []);
+
+  const sendVoice = useCallback(
+    (text: string) => {
+      if (busyRef.current) return;
+      addMsg(text, "user");
+      freezeAll();
+      void post({ kind: "text", text });
+    },
+    [addMsg, freezeAll, post],
+  );
+
+  /** One utterance: listen until the visitor pauses, then send what was heard. */
+  const listenOnce = useCallback(() => {
+    if (!voiceRef.current || busyRef.current || recRef.current) return;
+    const Ctor = speechCtor();
+    if (!Ctor) return;
+    const rec = new Ctor();
+    rec.lang = "en-IN";
+    rec.continuous = false; // end-of-utterance = end of the visitor's turn
+    rec.interimResults = true;
+    let heard = "";
+    let fatal = false;
+    rec.onresult = (ev) => {
+      heard = "";
+      for (let i = 0; i < ev.results.length; i++) heard += ev.results[i][0]?.transcript ?? "";
+      setDraft(heard); // live feedback while they speak
+    };
+    rec.onerror = (ev) => {
+      // Permission refused / no mic: stop the loop instead of retrying forever.
+      if (ev.error === "not-allowed" || ev.error === "audio-capture") fatal = true;
+    };
+    rec.onend = () => {
+      recRef.current = null;
+      setHearing(false);
+      const text = heard.trim();
+      setDraft("");
+      if (fatal || !voiceRef.current) {
+        if (fatal) {
+          voiceRef.current = false;
+          setVoiceOn(false);
+        }
+        return;
+      }
+      if (text) {
+        sendVoice(text); // reply arrives → spoken → listening resumes
+      } else {
+        window.setTimeout(() => listenRef.current(), 350); // silence — keep the ear open
+      }
+    };
+    try {
+      rec.start();
+      recRef.current = rec;
+      setHearing(true);
+    } catch {
+      // double-start during the permission prompt — ignore
+    }
+  }, [sendVoice]);
+  useEffect(() => {
+    listenRef.current = listenOnce;
+  }, [listenOnce]);
+
+  /** Read a reply aloud; when it finishes, hand the turn back to the visitor. */
+  const speak = useCallback(
+    (text: string) => {
+      try {
+        const synth = window.speechSynthesis;
+        if (!synth) {
+          listenOnce();
+          return;
+        }
+        synth.cancel();
+        const u = new SpeechSynthesisUtterance(text);
+        const voices = synth.getVoices();
+        u.voice =
+          voices.find((v) => v.lang === "en-IN") ??
+          voices.find((v) => v.lang?.startsWith("en")) ??
+          null;
+        u.rate = 1.04;
+        u.onend = () => {
+          if (voiceRef.current) listenOnce();
+        };
+        u.onerror = u.onend;
+        synth.speak(u);
+      } catch {
+        if (voiceRef.current) listenOnce();
+      }
+    },
+    [listenOnce],
+  );
+  useEffect(() => {
+    speakRef.current = speak;
+  }, [speak]);
+
+  const toggleVoice = () => {
+    if (voiceOn) {
+      voiceRef.current = false;
+      setVoiceOn(false);
+      setHearing(false);
+      recRef.current?.stop();
+      try {
+        window.speechSynthesis?.cancel();
+      } catch {
+        // fine — nothing was speaking
+      }
+      return;
+    }
+    voiceRef.current = true;
+    setVoiceOn(true);
+    listenOnce();
+  };
+
   // ── render ──────────────────────────────────────────────────────────────
   return (
     <div className="chat">
@@ -464,9 +629,34 @@ export default function Chat() {
               onChange={onDraftChange}
               onKeyDown={onKey}
               onPaste={onPaste}
-              placeholder="Describe what you're building…"
+              placeholder={
+                voiceOn
+                  ? hearing
+                    ? "Listening — just talk…"
+                    : "Voice conversation on — I'll listen after each reply"
+                  : "Describe what you're building…"
+              }
               aria-label="Message"
             />
+            {micOk && (
+              <button
+                type="button"
+                className={`mic${voiceOn ? " rec" : ""}`}
+                onClick={toggleVoice}
+                aria-label={voiceOn ? "End the voice conversation" : "Start a voice conversation"}
+                aria-pressed={voiceOn}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <rect x="9" y="2.5" width="6" height="11" rx="3" stroke="currentColor" strokeWidth="2" />
+                  <path
+                    d="M5 11a7 7 0 0 0 14 0M12 18v3.5"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
+            )}
             <button
               type="button"
               className="send"
@@ -486,7 +676,7 @@ export default function Chat() {
             </button>
           </div>
           <div className="foot">
-            Your details go straight to the Elecbits sales engineering team — no spam.
+            Your details go straight to the Elecbits engineering team — no spam.
           </div>
         </div>
       </div>

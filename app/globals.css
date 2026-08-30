@@ -674,6 +674,58 @@ button {
   opacity: 0.45;
   cursor: default;
 }
+/* Dictation mic — rendered only when the browser supports speech input. */
+.mic {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  margin: 6px 0;
+  color: var(--txt2);
+  background: none;
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    background 0.15s;
+}
+.mic:hover {
+  color: var(--acc);
+  background: var(--s2);
+}
+.mic:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+}
+.mic.rec {
+  color: #dc2626;
+  background: var(--s2);
+  animation: mic-pulse 1.4s ease-in-out infinite;
+}
+:root[data-theme="dark"] .mic.rec {
+  color: #f47272;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .mic.rec {
+    color: #f47272;
+  }
+}
+@keyframes mic-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mic.rec {
+    animation: none;
+  }
+}
 .send {
   display: grid;
   place-items: center;

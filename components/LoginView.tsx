@@ -559,7 +559,7 @@ export default function LoginView({ gate }: { gate: AuthGate }) {
             </li>
             <li>
               <FeatCheck />
-              One thread with the sales engineering team
+              One thread with the engineering team
             </li>
           </ul>
         </div>
