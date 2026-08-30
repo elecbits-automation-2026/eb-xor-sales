@@ -210,13 +210,15 @@ describe("LLD PDF deliverable", () => {
     let cur = await chat({ session_id: sid, kind: "chip", chip_id: "lld:generate" });
     expect(cur.meta.state).toBe("ODM_LLD_REVIEW");
     cur = await chat({ session_id: sid, kind: "chip", chip_id: "lld:accept" });
+    expect(cur.meta.state).toBe("ODM_SANCTION");
+    cur = await chat({ session_id: sid, kind: "chip", chip_id: "sanction:yes" });
     expect(cur.meta.state).toBe("DONE");
 
     const links = downloadLinks(cur);
     expect(links.length, "LLD download link missing on DONE").toBeGreaterThan(0);
     const lldLink = links.find((l) => l.label.toLowerCase().includes("lld")) ?? links[0];
     const fname = decodeURIComponent(lldLink.url.split("/").pop()!);
-    expect(fname).toMatch(/^LLD-draft-XOR-\d{8}-\d{3}\.pdf$/);
+    expect(fname).toMatch(/^EB-C-\d{2}-\d{4}-D\d{2} - .+ - LLD Draft\.pdf$/);
 
     const dl = await fetchDownload(lldLink.url);
     expect(dl.status).toBe(200);
@@ -249,15 +251,17 @@ describe("Benchmark report PDF deliverable", () => {
     let cur = await chat({ session_id: sid, kind: "chip", chip_id: "bench:generate" });
     expect(cur.meta.state).toBe("ODM_BENCH_REVIEW");
     cur = await chat({ session_id: sid, kind: "chip", chip_id: "bench:file" });
+    expect(cur.meta.state).toBe("ODM_SANCTION");
+    cur = await chat({ session_id: sid, kind: "chip", chip_id: "sanction:no" });
     expect(cur.meta.state).toBe("DONE");
 
     const links = downloadLinks(cur);
     const benchLink = links.find((l) =>
-      l.url.includes(encodeURIComponent("Product-Definition")),
+      l.url.includes(encodeURIComponent("Product Definition")),
     );
     expect(benchLink, "benchmark report download link missing on DONE").toBeDefined();
     const fname = decodeURIComponent(benchLink!.url.split("/").pop()!);
-    expect(fname).toMatch(/^Product-Definition-XOR-\d{8}-\d{3}\.pdf$/);
+    expect(fname).toMatch(/^EB-C-\d{2}-\d{4}-D\d{2} - .+ - Product Definition & Benchmark Report\.pdf$/);
 
     const dl = await fetchDownload(benchLink!.url);
     expect(dl.status).toBe(200);
@@ -292,12 +296,14 @@ describe("storeDoc pdf-failure fallback", () => {
       let cur = await chat({ session_id: sid, kind: "chip", chip_id: "lld:generate" });
       expect(cur.meta.state).toBe("ODM_LLD_REVIEW");
       cur = await chat({ session_id: sid, kind: "chip", chip_id: "lld:accept" });
+      expect(cur.meta.state).toBe("ODM_SANCTION");
+      cur = await chat({ session_id: sid, kind: "chip", chip_id: "sanction:yes" });
       expect(cur.meta.state).toBe("DONE");
 
       const links = downloadLinks(cur);
       expect(links.length, "deliverable link missing on DONE").toBeGreaterThan(0);
       const fname = decodeURIComponent(links[0].url.split("/").pop()!);
-      expect(fname).toMatch(/^LLD-draft-XOR-\d{8}-\d{3}\.md$/);
+      expect(fname).toMatch(/^EB-C-\d{2}-\d{4}-D\d{2} - .+ - LLD Draft\.md$/);
 
       const db = getDb();
       const s = await db.getSession(sid);

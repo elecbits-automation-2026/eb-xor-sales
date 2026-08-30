@@ -74,6 +74,7 @@ const STATE_LABELS: Record<SessionState, string> = {
   ODM_REVIEW: "review",
   ODM_BENCH_REVIEW: "defining your product",
   ODM_LLD_REVIEW: "refining your LLD",
+  ODM_SANCTION: "project sanction",
   EMS_CHECKLIST: "build package",
   EMS_DETAILS: "build details",
   PRODUCT_CATEGORY: "product enquiry",

@@ -16,6 +16,7 @@ export type SessionState =
   | "ODM_REVIEW"
   | "ODM_BENCH_REVIEW"
   | "ODM_LLD_REVIEW"
+  | "ODM_SANCTION"
   | "EMS_CHECKLIST"
   | "EMS_DETAILS"
   | "PRODUCT_CATEGORY"
@@ -122,6 +123,13 @@ export interface SessionData {
   bench_file?: string | null;
   bench_path?: string | null;
   bench_md_path?: string | null;
+  /** Drive ids of the editable DOCX copies living in the deal folder —
+   * revisions push new versions onto the SAME file instead of duplicating. */
+  lld_drive_id?: string | null;
+  bench_drive_id?: string | null;
+  /** The closing question of every ODM filing: did they apply for project
+   * sanction? null/undefined = never asked (legacy sessions). */
+  sanction_requested?: boolean | null;
   /** Deal folder refs — deal_id stamps WHICH deal they belong to, because a
    * session can file more than one deal (back-nav, track switches). */
   drive: { folder_id?: string; folder_url?: string; deal_id?: string };

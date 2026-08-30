@@ -150,6 +150,8 @@ async function odmToDone(
   cur = await chat({ session_id: sid, kind: "chip", chip_id: "lld:generate" }, ip, token);
   expect(cur.meta.state).toBe("ODM_LLD_REVIEW");
   cur = await chat({ session_id: sid, kind: "chip", chip_id: "lld:accept" }, ip, token);
+  expect(cur.meta.state).toBe("ODM_SANCTION");
+  cur = await chat({ session_id: sid, kind: "chip", chip_id: "sanction:yes" }, ip, token);
   expect(cur.meta.state).toBe("DONE");
   return { sid };
 }

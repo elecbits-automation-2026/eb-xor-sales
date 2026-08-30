@@ -2023,12 +2023,21 @@ button {
    Appears only once the session has tasks; the fixed theme toggle sits over
    its header, so the header keeps clearance on the right. */
 .tasks-panel {
+  --tasks-w: 300px;
   display: flex;
-  flex: 0 0 300px;
+  flex: 0 0 var(--tasks-w);
   flex-direction: column;
+  width: var(--tasks-w);
+  /* min-width:0 — without it a long unbreakable detail line (a live web
+     research query) sets min-content and silently widens the whole panel. */
+  min-width: 0;
+  max-width: 48vw;
   min-height: 0;
   background: var(--s1);
   border-left: 1px solid var(--bdr);
+}
+.tasks-panel.big {
+  --tasks-w: 520px;
 }
 .tp-head {
   display: flex;
@@ -2103,6 +2112,41 @@ button {
   color: var(--txt3);
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+/* Ellipsis only works when every flex level can shrink. */
+.tp-status {
+  min-width: 0;
+}
+.tp-card.expandable {
+  cursor: pointer;
+}
+.tp-card.open .tp-detail {
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
+.tp-head-right {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+.tp-size {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  color: var(--txt2);
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.tp-size:hover {
+  color: var(--acc);
+  background: var(--s2);
 }
 .tp-finished {
   display: flex;
