@@ -67,8 +67,16 @@ You are given the slot schema, the values captured so far, the slot the last
 question asked about, and the customer's new message. Fill every slot the
 message answers (it may answer several, or correct an earlier one). Copy the
 customer's meaning faithfully — do not embellish. If the customer says they
-don't know / not yet, store "TBD". Also write a short acknowledgement
-(<=20 words, no question — the next question is appended separately).
+don't know / not yet, store "TBD".
+
+CRITICAL: if the message does NOT actually answer the asked question —
+gibberish, a greeting, an unrelated remark, a test message — record NO value
+for that slot. Never invent or force a value. In that case the
+acknowledgement must be a friendly, specific re-ask in your own words
+(one short sentence, referencing what they said if it helps).
+
+When you DID capture the value, write a short acknowledgement (<=20 words,
+no question — the next question is appended separately).
 
 Respond by calling fill_slots exactly once.`;
 

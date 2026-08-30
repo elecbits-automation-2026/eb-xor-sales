@@ -145,10 +145,9 @@ export async function extractSlots(
     for (const [k, v] of Object.entries(raw)) {
       if (k in ODM_SLOT_LABELS && String(v).trim()) updates[k] = String(v);
     }
-    // Guarantee forward progress even if the model returns nothing usable.
-    if (expectedSlot && !(expectedSlot in updates) && !Object.keys(updates).length) {
-      updates[expectedSlot] = userText.trim();
-    }
+    // NO force-fill: when the model judged the message unusable for the
+    // asked slot, the orchestrator re-asks (bounded by maxProbeTurns) —
+    // "paneer pakoda" must never become the product concept.
     const ack = typeof out.ack === "string" && out.ack ? out.ack : "Noted.";
     return { updates, ack };
   } catch (err) {

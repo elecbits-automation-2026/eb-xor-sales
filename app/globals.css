@@ -1430,6 +1430,55 @@ button {
   background: var(--bg);
 }
 
+/* enquiry rows: id + date line */
+.app-row-top {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+  min-width: 0;
+}
+.app-row-date {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--txt3);
+  white-space: nowrap;
+}
+
+/* stored-conversation view on the enquiry detail */
+.pv-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 420px;
+  padding: 14px;
+  overflow-y: auto;
+  background: var(--s1);
+  border: 1px solid var(--bdr);
+  border-radius: 12px;
+}
+.pv-msg {
+  max-width: 86%;
+  padding: 8px 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+.pv-msg.bot {
+  align-self: flex-start;
+  background: var(--bg);
+  border: 1px solid var(--bdr);
+  border-radius: 12px 12px 12px 4px;
+}
+.pv-msg.user {
+  align-self: flex-end;
+  color: #fff;
+  background: var(--acc);
+  border-radius: 12px 12px 4px 12px;
+}
+
 /* ═══ background tasks — right-hand activity column (Claude-Code style) ══
    Appears only once the session has tasks; the fixed theme toggle sits over
    its header, so the header keeps clearance on the right. */

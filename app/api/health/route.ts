@@ -34,6 +34,7 @@ export async function GET() {
     mock_drive: boolean;
     db: "supabase" | "memory";
     auth: "supabase" | "demo";
+    llm?: { ok: true; model: string } | { error: string };
     google?:
       | { register: BindingReport; accounts_folder: BindingReport; funnel: BindingReport }
       | { error: string };
@@ -46,6 +47,23 @@ export async function GET() {
     db: cfg.supabaseUrl && cfg.supabaseServiceRoleKey ? "supabase" : "memory",
     auth: cfg.supabaseUrl && cfg.supabaseAnonKey ? "supabase" : "demo",
   };
+
+  // Real 1-token ping so an invalid key / empty credits is VISIBLE here
+  // instead of silently degrading the chat to canned fallbacks.
+  if (!cfg.mockLlm && cfg.anthropicApiKey) {
+    try {
+      const { default: Anthropic } = await import("@anthropic-ai/sdk");
+      const client = new Anthropic({ apiKey: cfg.anthropicApiKey });
+      await client.messages.create({
+        model: cfg.model,
+        max_tokens: 1,
+        messages: [{ role: "user", content: "ping" }],
+      });
+      body.llm = { ok: true, model: cfg.model };
+    } catch (e) {
+      body.llm = { error: errText(e) };
+    }
+  }
 
   try {
     if (!cfg.mockDrive && cfg.googleServiceAccountB64) {

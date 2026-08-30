@@ -33,6 +33,7 @@ import type {
   ChecklistItemDef,
   FormField,
   Msg,
+  SessionData,
   SessionState,
   Track,
   Widget,
@@ -490,6 +491,22 @@ async function odmSlots(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
   if (inp.kind !== "text" || !inp.text) return resume(s);
   const ext = await llm.extractSlots(s.data.slots, s.data.expected_slot, inp.text);
   Object.assign(s.data.slots, ext.updates ?? {});
+
+  // The asked slot didn't get answered (gibberish / off-topic / test)?
+  // Re-ask conversationally — Claude's ack IS the re-ask — up to
+  // maxProbeTurns per slot; only then accept the raw text so a determined
+  // visitor can still move forward.
+  const asked = s.data.expected_slot;
+  if (asked && !(asked in s.data.slots)) {
+    const d = s.data as SessionData & { slot_probes?: Record<string, number> };
+    const probes = (d.slot_probes ??= {});
+    probes[asked] = (probes[asked] ?? 0) + 1;
+    if (probes[asked] < cfg.maxProbeTurns) {
+      return out(s, [ext.ack || "Could you give me that once more, in a line?"]);
+    }
+    s.data.slots[asked] = inp.text.trim(); // 3rd strike — take it verbatim
+  }
+
   const nxt = ODM_SLOTS.find(([k]) => !(k in s.data.slots));
   if (nxt) {
     const [key, q, hint] = nxt;
