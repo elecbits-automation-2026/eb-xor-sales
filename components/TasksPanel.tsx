@@ -15,7 +15,7 @@
  * Renders nothing until the session has at least one task.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { TaskRow } from "@/lib/supabase";
 
@@ -64,10 +64,23 @@ export default function TasksPanel() {
     });
   }, []);
 
+  // Tracks the session the feed belongs to. Chat announces xor:session on
+  // EVERY (re)open — including the reload of the same conversation — and
+  // wiping the feed for the same session left the panel empty and unpolled
+  // ("status is not visible after refresh"). Clear only on a real switch.
+  const sidRef = useRef<string | null>(null);
+  useEffect(() => {
+    sidRef.current = sessionId;
+    // run once after the lazy initializer — keep ref/state in sync
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
     const onSession = (e: Event) => {
-      setSessionId((e as CustomEvent<string>).detail ?? null);
-      setTasks([]); // a fresh enquiry starts with a clean feed
+      const next = (e as CustomEvent<string>).detail ?? null;
+      if (sidRef.current === next) return; // same conversation — keep the feed
+      sidRef.current = next;
+      setTasks([]); // a fresh/switched enquiry starts with a clean feed
+      setSessionId(next);
     };
     window.addEventListener("xor:session", onSession);
     return () => window.removeEventListener("xor:session", onSession);
