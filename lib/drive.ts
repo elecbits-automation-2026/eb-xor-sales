@@ -16,7 +16,9 @@ import { Readable } from "stream";
 
 import { google, type drive_v3, type sheets_v4 } from "googleapis";
 import mammoth from "mammoth";
-import { PDFParse } from "pdf-parse";
+// NOTE: pdf-parse is imported lazily inside exportKbFileText — its pdfjs
+// core touches browser globals (DOMMatrix) at load time, which crashes any
+// serverless route that merely imports this module (e.g. Google discovery).
 
 import { ACCOUNT_SUBFOLDERS, cfg } from "@/lib/config";
 import { getDb } from "@/lib/supabase";
@@ -382,6 +384,7 @@ export async function exportKbFileText(f: KbSourceFile): Promise<string | null> 
   }
   if (f.mimeType === "application/pdf") {
     const buf = await downloadBinary(f.id);
+    const { PDFParse } = await import("pdf-parse");
     const parser = new PDFParse({ data: new Uint8Array(buf) });
     try {
       const result = await parser.getText();
