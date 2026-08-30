@@ -1689,6 +1689,7 @@ button {
   align-items: center;
   gap: 14px;
   max-width: 480px;
+  margin-bottom: 10px; /* two deliverables stack cleanly */
   padding: 14px 16px 14px 14px;
   color: inherit;
   text-decoration: none;

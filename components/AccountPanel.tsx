@@ -33,6 +33,7 @@ interface Enquiry {
   created_at: string;
   status: string | null;
   lld_url: string | null;
+  bench_url?: string | null;
 }
 
 interface MeOut {
@@ -271,6 +272,46 @@ function journeyStage(status: string | null): number {
 }
 
 // ── one enquiry, full detail ──────────────────────────────────────────────
+/** One downloadable deliverable row in the Documents section. */
+function DocRow({ href, name, kind }: { href: string; name: string; kind: string }) {
+  return (
+    <a className="pv-file" href={href} download>
+      <span className="pv-file-icon" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+          <path
+            d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z"
+            stroke="currentColor"
+            strokeWidth="1.7"
+            strokeLinejoin="round"
+          />
+          <path d="M14 3v5h5" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+          <path
+            d="M9 13.5h6M9 17h6"
+            stroke="currentColor"
+            strokeWidth="1.7"
+            strokeLinecap="round"
+          />
+        </svg>
+      </span>
+      <span className="pv-file-body">
+        <span className="pv-file-name">{name}</span>
+        <span className="pv-file-kind">{kind}</span>
+      </span>
+      <span className="pv-file-get" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+          <path
+            d="M12 4v11m0 0 4.5-4.5M12 15l-4.5-4.5M5 20h14"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </span>
+    </a>
+  );
+}
+
 function EnquiryDetail({ q, company }: { q: Enquiry; company: string | null }) {
   const ref = q.deal_id || q.lead_ref;
   const parsed = q.created_at ? new Date(q.created_at) : null;
@@ -361,43 +402,24 @@ function EnquiryDetail({ q, company }: { q: Enquiry; company: string | null }) {
       </dl>
 
       <section className="pv-sec">
+        {/* Every deliverable generated for this enquiry, benchmark first
+            (it precedes the LLD in the flow). */}
         <h2 className="pv-h">Documents</h2>
-        {q.lld_url ? (
-          <a className="pv-file" href={q.lld_url} download>
-            <span className="pv-file-icon" aria-hidden="true">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                <path
-                  d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinejoin="round"
-                />
-                <path d="M14 3v5h5" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
-                <path
-                  d="M9 13.5h6M9 17h6"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </span>
-            <span className="pv-file-body">
-              <span className="pv-file-name">Low-level design draft</span>
-              <span className="pv-file-kind">Markdown draft · generated from this enquiry</span>
-            </span>
-            <span className="pv-file-get" aria-hidden="true">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                <path
-                  d="M12 4v11m0 0 4.5-4.5M12 15l-4.5-4.5M5 20h14"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </span>
-          </a>
-        ) : (
+        {q.bench_url && (
+          <DocRow
+            href={q.bench_url}
+            name="Product Definition & Benchmark Report"
+            kind="Branded PDF · generated from this enquiry"
+          />
+        )}
+        {q.lld_url && (
+          <DocRow
+            href={q.lld_url}
+            name="Low-level design draft"
+            kind="Branded PDF · generated from this enquiry"
+          />
+        )}
+        {!q.lld_url && !q.bench_url && (
           <p className="pv-file-empty">
             Nothing to download just yet — the moment the engineering team drafts a document for
             this enquiry, it will appear right here.

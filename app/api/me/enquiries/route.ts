@@ -36,10 +36,14 @@ export async function GET(req: NextRequest) {
   const enquiries = [];
   for (const l of leads) {
     let lld_url: string | null = null;
+    let bench_url: string | null = null;
     if (l.session_id) {
       const s = await db.getSession(l.session_id);
       if (s?.data.lld_file) {
         lld_url = `/api/download/${l.session_id}/${encodeURIComponent(s.data.lld_file)}`;
+      }
+      if (s?.data.bench_file) {
+        bench_url = `/api/download/${l.session_id}/${encodeURIComponent(s.data.bench_file)}`;
       }
     }
     enquiries.push({
@@ -54,6 +58,7 @@ export async function GET(req: NextRequest) {
       created_at: l.created_at ?? null,
       status: l.drive_committed || l.sheet_appended ? "Filed" : "Received",
       lld_url,
+      bench_url,
     });
   }
 
