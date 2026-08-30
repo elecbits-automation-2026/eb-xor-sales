@@ -6,7 +6,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 
-import { cfg } from "@/lib/config";
+import { bucket, cfg } from "@/lib/config";
 import { checkExtension, EMS_CHECKLIST } from "@/lib/flows";
 import { clientKey, rateLimitOk } from "@/lib/ratelimit";
 import { getDb } from "@/lib/supabase";
@@ -53,7 +53,17 @@ export async function POST(req: NextRequest) {
   }
 
   const storage_path = `${s.id}/${item.key}--${safe}`;
-  const { url, token } = await db.signedUploadUrl(storage_path);
-  // signedUrl is the published contract name; url is kept as an alias.
-  return NextResponse.json({ signedUrl: url, url, token, storage_path, filename: safe });
+  try {
+    const { url, token } = await db.signedUploadUrl(storage_path);
+    // signedUrl is the published contract name; url is kept as an alias.
+    return NextResponse.json({ signedUrl: url, url, token, storage_path, filename: safe });
+  } catch (err) {
+    // Storage misconfiguration (bucket missing, bad creds) must read as a
+    // clear service condition, not a blank 500 the visitor retries forever.
+    console.error(`upload-url: storage unavailable (bucket "${bucket()}")`, err);
+    return NextResponse.json(
+      { detail: "Uploads are temporarily unavailable — skip this file for now; the team will collect it from you directly." },
+      { status: 503 },
+    );
+  }
 }
