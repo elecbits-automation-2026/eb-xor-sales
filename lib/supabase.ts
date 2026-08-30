@@ -175,6 +175,10 @@ export interface Db {
   unresolvedHandoffRetries(): Promise<HandoffRetryRow[]>;
   recordHandoffAttempt(id: number, ok: boolean, error?: string): Promise<void>;
 
+  // Settings — small key/value store (e.g. cached Google bindings)
+  getSetting(key: string): Promise<string | null>;
+  setSetting(key: string, value: string): Promise<void>;
+
   // Background tasks (the activity column on the chat page)
   insertTask(
     sessionId: string,
@@ -440,6 +444,25 @@ class SupabaseDb implements Db {
     );
   }
 
+  async getSetting(key: string): Promise<string | null> {
+    const { data, error } = await this.client
+      .from("settings")
+      .select("value")
+      .eq("key", key)
+      .maybeSingle();
+    if (error) throw new Error(`supabase: ${error.message}`);
+    return (data as { value: string } | null)?.value ?? null;
+  }
+
+  async setSetting(key: string, value: string): Promise<void> {
+    SupabaseDb.check(
+      await this.client
+        .from("settings")
+        .upsert({ key, value, updated_at: new Date().toISOString() })
+        .select("key"),
+    );
+  }
+
   async insertTask(
     sessionId: string,
     label: string,
@@ -585,6 +608,7 @@ interface MemState {
   retries: HandoffRetryRow[];
   retrySeq: number;
   tasks: TaskRow[];
+  settings: Map<string, string>;
   counters: Map<string, number>;
   objects: Map<string, { data: Uint8Array; contentType: string }>;
   uploadTokens: Map<string, string>; // token -> path
@@ -604,6 +628,7 @@ function memState(): MemState {
       retries: [],
       retrySeq: 0,
       tasks: [],
+      settings: new Map(),
       counters: new Map(),
       objects: new Map(),
       uploadTokens: new Map(),
@@ -785,6 +810,14 @@ class MemoryDb implements Db {
     row.attempts += 1;
     row.last_error = error ?? null;
     row.resolved_at = ok ? new Date().toISOString() : null;
+  }
+
+  async getSetting(key: string): Promise<string | null> {
+    return this.s.settings.get(key) ?? null;
+  }
+
+  async setSetting(key: string, value: string): Promise<void> {
+    this.s.settings.set(key, value);
   }
 
   async insertTask(

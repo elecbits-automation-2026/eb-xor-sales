@@ -68,10 +68,16 @@ function todayISO(): string {
 
 // ── Sheets-backed register ────────────────────────────────────────────────
 class SheetsRegister implements Register {
+  /** The register's spreadsheet id — env pin, cached binding, or discovery. */
+  private async sid(): Promise<string> {
+    const { resolveRegister } = await import("./gtargets");
+    return (await resolveRegister()).id;
+  }
+
   private async values(range: string): Promise<string[][]> {
     const { sheets } = await import("./drive");
     const res = await sheets().spreadsheets.values.get({
-      spreadsheetId: cfg.masterRegisterSpreadsheetId,
+      spreadsheetId: await this.sid(),
       range,
     });
     return (res.data.values ?? []) as string[][];
@@ -80,7 +86,7 @@ class SheetsRegister implements Register {
   private async append(range: string, row: (string | number)[]): Promise<void> {
     const { sheets } = await import("./drive");
     await sheets().spreadsheets.values.append({
-      spreadsheetId: cfg.masterRegisterSpreadsheetId,
+      spreadsheetId: await this.sid(),
       range,
       valueInputOption: "RAW",
       insertDataOption: "INSERT_ROWS",
@@ -91,7 +97,7 @@ class SheetsRegister implements Register {
   private async update(range: string, row: (string | number)[]): Promise<void> {
     const { sheets } = await import("./drive");
     await sheets().spreadsheets.values.update({
-      spreadsheetId: cfg.masterRegisterSpreadsheetId,
+      spreadsheetId: await this.sid(),
       range,
       valueInputOption: "RAW",
       requestBody: { values: [row] },
@@ -202,9 +208,9 @@ let sheetsRegister: SheetsRegister | null = null;
 const offlineRegister = new OfflineRegister();
 
 export function registerConfigured(): boolean {
-  return Boolean(
-    !cfg.mockDrive && cfg.masterRegisterSpreadsheetId && cfg.googleServiceAccountB64,
-  );
+  // The spreadsheet id is no longer required — SheetsRegister discovers the
+  // register by name (gtargets) when MASTER_REGISTER_SPREADSHEET_ID is unset.
+  return Boolean(!cfg.mockDrive && cfg.googleServiceAccountB64);
 }
 
 export function register(): Register {

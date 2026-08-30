@@ -72,6 +72,11 @@ function drive(): drive_v3.Drive {
 }
 
 /** Shared Sheets v4 client (used by lib/sheets.ts). */
+/** The Drive API client — exported for the name-discovery layer (gtargets). */
+export function driveApi(): drive_v3.Drive {
+  return drive();
+}
+
 export function sheets(): sheets_v4.Sheets {
   if (!sheetsClient) sheetsClient = google.sheets({ version: "v4", auth: auth() });
   return sheetsClient;
@@ -192,8 +197,8 @@ export interface DriveResult {
  * whole handoff.
  */
 export async function driveHandoff(p: DriveHandoffPayload): Promise<DriveResult> {
-  const parent = cfg.accountsParentFolderId;
-  if (!parent) throw new Error("ACCOUNTS_PARENT_FOLDER_ID is not set");
+  const { resolveAccountsFolder } = await import("./gtargets");
+  const parent = (await resolveAccountsFolder()).id;
 
   let clientFolderId: string | null = null;
   let rootId: string;
