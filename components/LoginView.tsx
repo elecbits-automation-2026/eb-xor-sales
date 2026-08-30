@@ -159,6 +159,26 @@ export default function LoginView({ gate }: { gate: AuthGate }) {
   const [rsEmail, setRsEmail] = useState("");
   const [newPass, setNewPass] = useState("");
 
+  // Sales-team dropdown (core.people) — hidden when the list is empty.
+  const [agents, setAgents] = useState<string[]>([]);
+  const [agent, setAgent] = useState("");
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const r = await fetch("/api/sales-agents");
+        if (!r.ok) return;
+        const b = (await r.json()) as { agents?: string[] };
+        if (alive && Array.isArray(b.agents)) setAgents(b.agents.filter((a) => typeof a === "string"));
+      } catch {
+        // dropdown simply stays hidden
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   // ── actions ─────────────────────────────────────────────────────────────
   const doGoogle = async () => {
     if (busy) return;
@@ -206,7 +226,12 @@ export default function LoginView({ gate }: { gate: AuthGate }) {
     setBusy(true);
     try {
       const em = email.trim();
-      const { needsEmailConfirm } = await signUp({ name: name.trim(), email: em, password: pass });
+      const { needsEmailConfirm } = await signUp({
+        name: name.trim(),
+        email: em,
+        password: pass,
+        salesAgent: agent || undefined,
+      });
       setPass("");
       if (needsEmailConfirm) {
         setView({ v: "confirmSent", email: em });
@@ -421,6 +446,22 @@ export default function LoginView({ gate }: { gate: AuthGate }) {
             value={pass}
             onChange={(e) => setPass(e.target.value)}
           />
+          {!signin && agents.length > 0 && (
+            <select
+              id={`${uid}-agent`}
+              className="lg-input"
+              aria-label="Your Elecbits contact"
+              value={agent}
+              onChange={(e) => setAgent(e.target.value)}
+            >
+              <option value="">Elecbits contact — not sure yet</option>
+              {agents.map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
+            </select>
+          )}
           {signin && !demo && (
             <div className="lg-forgot-row">
               <button

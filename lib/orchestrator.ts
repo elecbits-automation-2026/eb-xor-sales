@@ -130,6 +130,7 @@ export async function handle(inp: ChatIn, authUser?: AuthUser | null): Promise<C
   if (authUser && s.data.auth_user_id !== authUser.id) {
     s.data.auth_user_id = authUser.id;
     s.data.auth_email = authUser.email;
+    s.data.sales_agent = authUser.sales_agent ?? null;
   }
 
   if (inp.kind === "open") {
@@ -835,6 +836,10 @@ async function resolveClient(s: SessionRow): Promise<ClientRow> {
       await db.updateClient(client.id, { auth_user_id: d.auth_user_id });
       client = { ...client, auth_user_id: d.auth_user_id };
     }
+    if (d.sales_agent && !client.sales_agent) {
+      await db.updateClient(client.id, { sales_agent: d.sales_agent });
+      client = { ...client, sales_agent: d.sales_agent };
+    }
   } else {
     const { register } = await import("./register");
     client = await trackTask(
@@ -858,6 +863,7 @@ async function resolveClient(s: SessionRow): Promise<ClientRow> {
           auth_user_id: d.auth_user_id,
           drive_folder_id: null,
           drive_folder_url: null,
+          sales_agent: d.sales_agent ?? null,
         });
       },
       { detail: (c) => c.client_code },

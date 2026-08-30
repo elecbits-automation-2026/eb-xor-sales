@@ -19,11 +19,13 @@ export interface AuthUser {
   id: string;
   email: string; // lowercased, verified
   name: string;
+  /** Elecbits sales agent chosen at signup (core.people), if any. */
+  sales_agent?: string | null;
 }
 
 // ── memory backend ────────────────────────────────────────────────────────
 interface MemAuthState {
-  users: Map<string, { id: string; email: string; name: string; passHash: string }>;
+  users: Map<string, { id: string; email: string; name: string; sales_agent?: string | null; passHash: string }>;
   tokens: Map<string, string>; // token -> user id
 }
 
@@ -47,6 +49,7 @@ export function memorySignUp(
   email: string,
   password: string,
   name: string,
+  salesAgent = "",
 ): { token: string; user: AuthUser } | { error: string; status: number } {
   const s = memAuth();
   const key = email.trim().toLowerCase();
@@ -55,7 +58,12 @@ export function memorySignUp(
   if ([...s.users.values()].some((u) => u.email === key)) {
     return { error: "an account with this email already exists — sign in instead", status: 409 };
   }
-  const user = { id: randomUUID(), email: key, name: (name ?? "").trim() };
+  const user = {
+    id: randomUUID(),
+    email: key,
+    name: (name ?? "").trim(),
+    sales_agent: salesAgent.trim() || null,
+  };
   s.users.set(user.id, { ...user, passHash: hash(password) });
   const token = randomUUID() + randomUUID().replace(/-/g, "");
   s.tokens.set(token, user.id);
@@ -82,7 +90,9 @@ function memoryUser(token: string): AuthUser | null {
   const id = s.tokens.get(token);
   if (!id) return null;
   const rec = s.users.get(id);
-  return rec ? { id: rec.id, email: rec.email, name: rec.name } : null;
+  return rec
+    ? { id: rec.id, email: rec.email, name: rec.name, sales_agent: rec.sales_agent ?? null }
+    : null;
 }
 
 // ── Supabase backend ──────────────────────────────────────────────────────
@@ -117,6 +127,10 @@ export async function getUserFromRequest(req: Request): Promise<AuthUser | null>
       id: u.id,
       email: u.email!.toLowerCase(),
       name: typeof u.user_metadata?.name === "string" ? u.user_metadata.name : "",
+      sales_agent:
+        typeof u.user_metadata?.sales_agent === "string" && u.user_metadata.sales_agent
+          ? u.user_metadata.sales_agent
+          : null,
     };
   } catch (err) {
     console.error("auth token verification failed:", err);

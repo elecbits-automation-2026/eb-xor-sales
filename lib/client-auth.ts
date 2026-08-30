@@ -170,13 +170,14 @@ export async function signUp(i: {
   company?: string;
   email: string;
   password: string;
+  salesAgent?: string;
 }): Promise<{ needsEmailConfirm: boolean }> {
   if ((await authMode()) === "supabase") {
     const { data, error } = await (await sb()).auth.signUp({
       email: i.email,
       password: i.password,
       options: {
-        data: { name: i.name, company: i.company ?? "" },
+        data: { name: i.name, company: i.company ?? "", sales_agent: i.salesAgent ?? "" },
         // The Supabase project is shared with the PMS app, whose domain is
         // the project-wide Site URL — so the confirm-email link must carry
         // OUR return address or the client lands on the wrong product.
@@ -194,6 +195,7 @@ export async function signUp(i: {
     password: i.password,
     name: i.name,
     company: i.company ?? "",
+    sales_agent: i.salesAgent ?? "",
   });
   storeDemo(token, { email: user.email, name: user.name });
   return { needsEmailConfirm: false };
