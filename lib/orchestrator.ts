@@ -767,6 +767,43 @@ const LLD_REVIEW_CHIPS = [
   { id: "lld:regen", label: "Regenerate with more depth" },
 ];
 
+/**
+ * Store the LLD twice: markdown (grounds later revisions) and a branded
+ * Elecbits .docx — the customer-facing deliverable. Docx generation is
+ * best-effort: on any failure the markdown serves, never a broken flow.
+ */
+async function storeLld(s: SessionRow, lldMd: string): Promise<string> {
+  const db = getDb();
+  const lead = s.data.lead_ref ?? "XOR";
+  const mdName = `LLD-draft-${lead}.md`;
+  const mdPath = `${s.id}/generated/${mdName}`;
+  await db.putObject(mdPath, new TextEncoder().encode(lldMd), "text/markdown");
+  s.data.lld_md_path = mdPath;
+  try {
+    const { lldDocx } = await import("./lld-docx");
+    const buf = await lldDocx(lldMd, {
+      leadRef: lead,
+      dealId: s.data.deal_id,
+      company: s.data.contact.company ?? null,
+    });
+    const docxName = `LLD-draft-${lead}.docx`;
+    const docxPath = `${s.id}/generated/${docxName}`;
+    await db.putObject(
+      docxPath,
+      new Uint8Array(buf),
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    );
+    s.data.lld_file = docxName;
+    s.data.lld_path = docxPath;
+    return docxName;
+  } catch (err) {
+    console.error("lld docx generation failed — serving markdown instead", err);
+    s.data.lld_file = mdName;
+    s.data.lld_path = mdPath;
+    return mdName;
+  }
+}
+
 /** Iterative LLD editing: revise on feedback, file on approval. */
 async function odmLldReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
   const db = getDb();
@@ -778,7 +815,8 @@ async function odmLldReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
         ? "Regenerate the draft from scratch with substantially more engineering depth in every section."
         : null;
   if (feedback) {
-    const prior = s.data.lld_path ? await db.getObject(s.data.lld_path) : null;
+    const mdPath = s.data.lld_md_path ?? s.data.lld_path;
+    const prior = mdPath ? await db.getObject(mdPath) : null;
     const priorMd = prior ? new TextDecoder().decode(prior) : "";
     const transcript = await db.recentMessages(s.id, 40);
     const lldMd = await llm.generateLld(
@@ -788,11 +826,7 @@ async function odmLldReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
       transcript,
       { prior: priorMd, feedback },
     );
-    const fname = s.data.lld_file ?? `LLD-draft-${s.data.lead_ref}.md`;
-    const path = s.data.lld_path ?? `${s.id}/generated/${fname}`;
-    await db.putObject(path, new TextEncoder().encode(lldMd), "text/markdown");
-    s.data.lld_file = fname;
-    s.data.lld_path = path;
+    const fname = await storeLld(s, lldMd);
     return out(
       s,
       ["Rewritten with your changes. Take another look — more edits, or shall I file it?"],
@@ -819,11 +853,7 @@ async function odmReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
         s.data.lead_ref,
         transcript,
       );
-      const fname = `LLD-draft-${s.data.lead_ref}.md`;
-      const path = `${s.id}/generated/${fname}`;
-      await db.putObject(path, new TextEncoder().encode(lldMd), "text/markdown");
-      s.data.lld_file = fname;
-      s.data.lld_path = path;
+      const fname = await storeLld(s, lldMd);
       // The draft is EDITABLE — iterate with the customer until it reads
       // right, exactly like working a doc in Claude; only then file it.
       s.state = "ODM_LLD_REVIEW";

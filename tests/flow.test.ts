@@ -176,7 +176,12 @@ describe("ODM flow", () => {
       { params: Promise.resolve({ session: sessionPart, file: filePart }) },
     );
     expect(dl.status).toBe(200);
-    expect(await dl.text()).toContain("LLD Draft");
+    // The deliverable is the branded .docx (a ZIP: leading "PK") with the
+    // Word content type; markdown only serves as the docx-failure fallback.
+    expect(dl.headers.get("content-type")).toContain("wordprocessingml");
+    const body = Buffer.from(await dl.arrayBuffer());
+    expect(body.subarray(0, 2).toString("latin1")).toBe("PK");
+    expect(body.length).toBeGreaterThan(5000);
 
     // leads row exists with a well-formed ref
     const db = getDb();
