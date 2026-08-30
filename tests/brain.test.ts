@@ -1,6 +1,6 @@
 /**
- * The Drive-doc "brain" (lib/brain.ts): discovers the XOR-Knowledge folder
- * (falling back to Eb-Central-ULM), concatenates text-bearing docs under the
+ * The Drive-doc "brain" (lib/brain.ts): crawls the COMPLETE visible Drive
+ * (priority-named docs first, then newest text docs), concatenates under the
  * per-doc/total caps, caches the result in the settings store for an hour,
  * never throws, and short-circuits to "" in mock mode. The prompt builders
  * inject the brain ahead of the volatile excerpts. Drive is mocked — no
@@ -29,7 +29,6 @@ import { brainContext, refreshBrain } from "@/lib/brain";
 import { SYSTEM_QA, SYSTEM_TRIAGE, buildQaSystem, buildTriageSystem } from "@/lib/prompts";
 import { getDb, resetMemoryDb, type KbMatch } from "@/lib/supabase";
 
-const FOLDER = "application/vnd.google-apps.folder";
 const GDOC = "application/vnd.google-apps.document";
 
 function listReturns(...pages: { id: string; name: string; mimeType: string }[][]) {
@@ -54,79 +53,62 @@ afterAll(() => {
 });
 
 describe("brainContext", () => {
-  it("concatenates the XOR-Knowledge docs with the per-doc cap", async () => {
+  it("merges priority-named docs with recent docs, de-duplicated, per-doc capped", async () => {
     listReturns(
-      [{ id: "kn", name: "XOR-Knowledge", mimeType: FOLDER }],
       [
-        { id: "sop", name: "Sales SOP", mimeType: GDOC },
+        { id: "sop", name: "Eb-SOP Project Setup", mimeType: GDOC },
+        { id: "lld", name: "EbODM_LLDReferenceLibrary sample", mimeType: GDOC },
+      ], // priority search
+      [
+        { id: "sop", name: "Eb-SOP Project Setup", mimeType: GDOC }, // duplicate
         { id: "big", name: "Big Handbook", mimeType: "text/plain" },
-        { id: "logo", name: "logo.png", mimeType: "image/png" }, // filtered out
-        { id: "sub", name: "Archive", mimeType: FOLDER }, // filtered out
-      ],
+      ], // recent search
     );
     exportText.mockImplementation(async (f: { id: string }) =>
-      f.id === "sop" ? "Always issue EB-C codes from the register." : "x".repeat(10_000),
+      f.id === "big" ? "x".repeat(10_000) : `body of ${f.id}`,
     );
 
     const text = await brainContext();
-    expect(text).toContain("### Sales SOP\nAlways issue EB-C codes from the register.");
-    // per-doc cap: the 10k-char handbook is clipped to 6000
-    expect(text.split("### Big Handbook\n")[1]).toHaveLength(6000);
-    // non-text types are never exported
-    expect(exportText).toHaveBeenCalledTimes(2);
-    // children come from the discovered folder, newest first
-    expect(filesList).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        q: expect.stringContaining("'kn' in parents"),
-        orderBy: "modifiedTime desc",
-      }),
+    expect(text).toContain("### Eb-SOP Project Setup\nbody of sop");
+    expect(text).toContain("### EbODM_LLDReferenceLibrary sample\nbody of lld");
+    // duplicate never re-exported; per-doc cap clips the handbook to 5000
+    expect(exportText).toHaveBeenCalledTimes(3);
+    expect(text.split("### Big Handbook\n")[1]).toHaveLength(5000);
+    // both searches are name/mime queries over the whole visible Drive
+    expect(filesList).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ q: expect.stringContaining("name contains 'SOP'") }),
+    );
+    expect(filesList).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ q: expect.stringContaining("mimeType = '") }),
     );
   });
 
-  it("stops at the 24000-char total cap", async () => {
+  it("stops at the 60000-char total cap", async () => {
     listReturns(
-      [{ id: "kn", name: "XOR-Knowledge", mimeType: FOLDER }],
-      [1, 2, 3, 4, 5].map((n) => ({ id: `d${n}`, name: `Doc-${n}`, mimeType: GDOC })),
+      [],
+      Array.from({ length: 15 }, (_, i) => ({ id: `d${i}`, name: `Doc-${i}`, mimeType: GDOC })),
     );
-    exportText.mockResolvedValue("a".repeat(6000));
+    exportText.mockResolvedValue("a".repeat(5000));
 
     const text = await brainContext();
-    expect(text).toHaveLength(24_000);
-    // the budget was full before the 5th doc — it is never even exported
-    expect(exportText).toHaveBeenCalledTimes(4);
-    expect(text).not.toContain("Doc-5");
+    expect(text).toHaveLength(60_000);
+    // the budget filled before the 13th doc — it is never even exported
+    expect(exportText).toHaveBeenCalledTimes(12);
   });
 
   it("serves the cached text within the TTL without touching Drive again", async () => {
-    listReturns(
-      [{ id: "kn", name: "XOR-Knowledge", mimeType: FOLDER }],
-      [{ id: "sop", name: "Sales SOP", mimeType: GDOC }],
-    );
+    listReturns([], [{ id: "sop", name: "Sales SOP", mimeType: GDOC }]);
     exportText.mockResolvedValue("SOP body.");
 
     const first = await brainContext();
     expect(first).toContain("### Sales SOP\nSOP body.");
-    expect(filesList).toHaveBeenCalledTimes(2); // folder search + children
+    expect(filesList).toHaveBeenCalledTimes(2); // priority + recent
 
     const second = await brainContext();
     expect(second).toBe(first);
     expect(filesList).toHaveBeenCalledTimes(2); // cache hit — no new calls
-  });
-
-  it("falls back to the Eb-Central-ULM folder when XOR-Knowledge is absent", async () => {
-    listReturns(
-      [], // no XOR-Knowledge folder
-      [{ id: "ulm", name: "Eb-Central-ULM", mimeType: FOLDER }],
-      [{ id: "c", name: "Central SOP", mimeType: GDOC }],
-    );
-    exportText.mockResolvedValue("Central body.");
-
-    const text = await brainContext();
-    expect(text).toContain("### Central SOP\nCentral body.");
-    expect(filesList).toHaveBeenNthCalledWith(
-      3,
-      expect.objectContaining({ q: expect.stringContaining("'ulm' in parents") }),
-    );
   });
 
   it("returns empty immediately in mock mode or without a service account", async () => {
@@ -147,7 +129,7 @@ describe("brainContext", () => {
   it("serves the stale cached text when the refresh fails — and never throws", async () => {
     const staleAt = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
     await getDb().setSetting(
-      "google:brain",
+      "google:brain:v2",
       JSON.stringify({ text: "old brain", fetched_at: staleAt }),
     );
     filesList.mockRejectedValue(new Error("drive down"));
@@ -161,18 +143,12 @@ describe("brainContext", () => {
   });
 
   it("refreshBrain refetches inside the TTL and updates the cache", async () => {
-    listReturns(
-      [{ id: "kn", name: "XOR-Knowledge", mimeType: FOLDER }],
-      [{ id: "sop", name: "Sales SOP", mimeType: GDOC }],
-    );
+    listReturns([], [{ id: "sop", name: "Sales SOP", mimeType: GDOC }]);
     exportText.mockResolvedValue("v1");
     await brainContext();
     expect(filesList).toHaveBeenCalledTimes(2);
 
-    listReturns(
-      [{ id: "kn", name: "XOR-Knowledge", mimeType: FOLDER }],
-      [{ id: "sop", name: "Sales SOP", mimeType: GDOC }],
-    );
+    listReturns([], [{ id: "sop", name: "Sales SOP", mimeType: GDOC }]);
     exportText.mockResolvedValue("v2");
     const refreshed = await refreshBrain();
     expect(refreshed).toContain("v2");

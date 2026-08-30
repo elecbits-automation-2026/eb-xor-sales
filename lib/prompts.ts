@@ -76,7 +76,15 @@ acknowledgement must be a friendly, specific re-ask in your own words
 (one short sentence, referencing what they said if it helps).
 
 When you DID capture the value, write a short acknowledgement (<=20 words,
-no question — the next question is appended separately).
+no question).
+
+next_question: the context lists the remaining slots in order. After
+applying your updates, take the FIRST slot still unfilled and write ONE
+short, specific question for it — phrased for THIS product and
+conversation, the way a senior hardware consultant would ask (reference
+their answers, industry norms, certifications, realistic ranges). Never a
+generic form question. Omit it when no slots remain or when your ack is
+already a re-ask.
 
 Respond by calling fill_slots exactly once.`;
 
@@ -94,10 +102,32 @@ export const TOOL_SLOTS: Anthropic.Tool = {
         type: "string",
         description: "Short acknowledgement, no question.",
       },
+      next_question: {
+        type: "string",
+        description:
+          "The question for the first remaining unfilled slot, phrased for this specific product/conversation.",
+      },
     },
     required: ["updates", "ack"],
   },
 };
+
+/** Slot-extraction system prompt, grounded with the Drive-doc brain. */
+export function buildSlotsSystem(brain = ""): string {
+  return `${SYSTEM_SLOTS}${brainSection(brain)}`;
+}
+
+/** LLD system prompt, grounded with the Drive-doc brain (the LLD reference
+ * library and SOPs ride in it) so drafts mirror the house approach. */
+export function buildLldSystem(brain = ""): string {
+  const base = `${SYSTEM_LLD}${brainSection(brain)}`;
+  if (!brain.trim()) return base;
+  return `${base}
+
+Mirror the structure, depth and terminology of the company reference
+documents above (especially any LLD reference material) wherever they
+apply — this draft should read like an Elecbits document.`;
+}
 
 // ── General Q&A (QUESTION classification) ────────────────────────────────
 export const SYSTEM_QA = `You are XOR Assist on the Elecbits website. Answer the visitor's

@@ -15,11 +15,11 @@ import { ODM_SLOT_LABELS } from "@/lib/flows";
 import { retrieveContext } from "@/lib/knowledge";
 import { templateLld } from "@/lib/lld";
 import {
-  SYSTEM_LLD,
-  SYSTEM_SLOTS,
   TOOL_SLOTS,
   TOOL_TRIAGE,
+  buildLldSystem,
   buildQaSystem,
+  buildSlotsSystem,
   buildTriageSystem,
 } from "@/lib/prompts";
 import type { Msg, Track, TriageTrack } from "@/lib/widgets";
@@ -125,7 +125,8 @@ export async function extractSlots(
   slotsSoFar: Record<string, string>,
   expectedSlot: string | null,
   userText: string,
-): Promise<{ updates: Record<string, string>; ack: string }> {
+  remainingSlots: { key: string; label: string }[] = [],
+): Promise<{ updates: Record<string, string>; ack: string; nextQuestion?: string }> {
   if (cfg.mockLlm) {
     const updates: Record<string, string> = expectedSlot
       ? { [expectedSlot]: userText.trim() }
@@ -136,10 +137,17 @@ export async function extractSlots(
   const context =
     `Slot schema (key -> label):\n${schemaDesc}\n\n` +
     `Values so far: ${JSON.stringify(slotsSoFar)}\n` +
-    `The last question asked about slot: ${expectedSlot}\n\n` +
+    `The last question asked about slot: ${expectedSlot}\n` +
+    `Remaining slots, in order (next_question targets the first one your ` +
+    `updates leave unfilled): ${JSON.stringify(remainingSlots)}\n\n` +
     `Customer message: ${userText}`;
   try {
-    const out = await callTool(SYSTEM_SLOTS, [{ role: "user", content: context }], TOOL_SLOTS);
+    const brain = await brainContext(); // never throws — cached text or ""
+    const out = await callTool(
+      buildSlotsSystem(brain),
+      [{ role: "user", content: context }],
+      TOOL_SLOTS,
+    );
     const raw =
       out.updates && typeof out.updates === "object"
         ? (out.updates as Record<string, unknown>)
@@ -152,7 +160,8 @@ export async function extractSlots(
     // asked slot, the orchestrator re-asks (bounded by maxProbeTurns) —
     // "paneer pakoda" must never become the product concept.
     const ack = typeof out.ack === "string" && out.ack ? out.ack : "Noted.";
-    return { updates, ack };
+    const nq = typeof out.next_question === "string" ? out.next_question.trim() : "";
+    return { updates, ack, nextQuestion: nq && nq.length <= 300 ? nq : undefined };
   } catch (err) {
     console.error("slot extraction failed; using raw text:", err);
     return {
@@ -202,10 +211,11 @@ export async function generateLld(
     .map(([k, v]) => `- ${ODM_SLOT_LABELS[k] ?? k}: ${v}`)
     .join("\n");
   try {
+    const brain = await brainContext(); // never throws — cached text or ""
     const resp = await getClient().messages.create({
       model: cfg.model,
       max_tokens: 2048,
-      system: SYSTEM_LLD,
+      system: buildLldSystem(brain),
       messages: [
         {
           role: "user",

@@ -593,7 +593,11 @@ async function startTrackFlow(s: SessionRow, first: string, prefix = ""): Promis
 
 async function odmSlots(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
   if (inp.kind !== "text" || !inp.text) return resume(s);
-  const ext = await llm.extractSlots(s.data.slots, s.data.expected_slot, inp.text);
+  const remaining = ODM_SLOTS.filter(([k]) => !(k in s.data.slots)).map(([k]) => ({
+    key: k,
+    label: ODM_SLOT_LABELS[k] ?? k,
+  }));
+  const ext = await llm.extractSlots(s.data.slots, s.data.expected_slot, inp.text, remaining);
   Object.assign(s.data.slots, ext.updates ?? {});
 
   // The asked slot didn't get answered (gibberish / off-topic / test)?
