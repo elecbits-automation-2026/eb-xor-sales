@@ -10,6 +10,7 @@ import { checkExtension, EMS_CHECKLIST } from "@/lib/flows";
 import * as orchestrator from "@/lib/orchestrator";
 import { clientKey, rateLimitOk } from "@/lib/ratelimit";
 import { getDb } from "@/lib/supabase";
+import { noteTask } from "@/lib/tasks";
 import { sanitizeFilename } from "@/lib/util";
 
 export async function POST(req: NextRequest) {
@@ -81,6 +82,7 @@ export async function POST(req: NextRequest) {
     drive_file_id: null,
   });
 
+  await noteTask(s.id, `Receive ${safe}`, "completed", item.label);
   const res = await orchestrator.handleUpload(s, item.key, safe);
   return NextResponse.json(res);
 }

@@ -72,7 +72,9 @@ Clients can sign up / sign in and see **their enquiries** at `/account`
 (identity = verified login only; typed contact emails never unlock data).
 
 1. Run [`supabase/migrations/0002_clients.sql`](supabase/migrations/0002_clients.sql)
-   (clients table + the PMS-consistent ID counters).
+   (clients table + the PMS-consistent ID counters), then
+   [`supabase/migrations/0003_tasks.sql`](supabase/migrations/0003_tasks.sql)
+   (the per-session "Background tasks" activity feed shown on the chat page).
 2. Supabase Dashboard → Authentication → Providers → enable **Email**, and
    keep **Confirm email ON** — unconfirmed signups must never unlock an
    enquiry list. Set Site URL (Authentication → URL Configuration) to your

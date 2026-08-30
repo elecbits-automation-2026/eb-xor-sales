@@ -80,6 +80,11 @@ export async function POST(req: NextRequest) {
       }
       await db.recordHandoffAttempt(r.id, true);
       resolved++;
+      await markTaskRecovered(
+        db,
+        r.lead_id,
+        r.kind === "drive" ? "Create Drive workspace" : "Log to sales funnel",
+      );
     } catch (e) {
       failed++;
       const message = e instanceof Error ? e.message : String(e);
@@ -93,6 +98,26 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json({ ok: true, processed, resolved, failed, skipped });
+}
+
+/**
+ * Flip the matching failed row in the session's "Background tasks" feed to
+ * completed once its retry lands — purely cosmetic, so best-effort.
+ */
+async function markTaskRecovered(
+  db: ReturnType<typeof getDb>,
+  leadId: string,
+  label: string,
+): Promise<void> {
+  try {
+    const lead = await db.getLead(leadId);
+    if (!lead?.session_id) return;
+    const tasks = await db.tasksForSession(lead.session_id);
+    const t = tasks.filter((x) => x.label === label && x.status === "failed").pop();
+    if (t) await db.updateTask(t.id, { status: "completed", detail: "recovered by retry" });
+  } catch (e) {
+    console.error(`task recovery mark failed (lead ${leadId}, ${label})`, e);
+  }
 }
 
 // Vercel Cron invokes with GET (Authorization: Bearer CRON_SECRET is

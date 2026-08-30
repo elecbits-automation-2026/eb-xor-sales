@@ -29,6 +29,17 @@ import { WidgetView } from "./widgets";
 
 const SESSION_KEY = "xor_session_id";
 
+/** Notify listeners (the Background-tasks panel) — best-effort, never throws. */
+function emit(name: string, detail?: string) {
+  try {
+    window.dispatchEvent(
+      detail === undefined ? new Event(name) : new CustomEvent(name, { detail }),
+    );
+  } catch {
+    // no listeners / SSR — irrelevant
+  }
+}
+
 const STATE_LABELS: Record<SessionState, string> = {
   DISCOVER: "understanding your need",
   TRACK_CONFIRM: "confirming track",
@@ -78,6 +89,7 @@ export default function Chat() {
   }, []);
 
   const render = useCallback((res: ChatOut) => {
+    if (sessionRef.current !== res.session_id) emit("xor:session", res.session_id);
     sessionRef.current = res.session_id;
     try {
       sessionStorage.setItem(SESSION_KEY, res.session_id);
@@ -108,6 +120,7 @@ export default function Chat() {
       busyRef.current = true;
       setBusy(true);
       setAwaiting(true);
+      emit("xor:busy");
       try {
         const body: ChatIn = {
           session_id: sessionOverride ?? sessionRef.current ?? undefined,
@@ -130,6 +143,7 @@ export default function Chat() {
         busyRef.current = false;
         setBusy(false);
         setAwaiting(false);
+        emit("xor:activity");
         inputRef.current?.focus();
       }
     },
@@ -221,6 +235,7 @@ export default function Chat() {
       if (busyRef.current || !sessionRef.current) return;
       busyRef.current = true;
       setBusy(true);
+      emit("xor:busy");
       try {
         const token = await getAccessToken();
         const auth: Record<string, string> = token ? { authorization: `Bearer ${token}` } : {};
@@ -286,6 +301,7 @@ export default function Chat() {
       } finally {
         busyRef.current = false;
         setBusy(false);
+        emit("xor:activity");
       }
     },
     [addMsg, freezeAll, render],
