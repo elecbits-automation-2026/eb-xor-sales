@@ -8,8 +8,9 @@ import type { ChatIn } from "@/lib/widgets";
 // Finalize (Drive folder + file transfers + Sheets) and the opus document
 // generations (LLD / benchmark report, both web-search-assisted) run inside
 // this route — give them the full Fluid Compute window so a long generation
-// never dies as a "connection hiccup".
-export const maxDuration = 300;
+// never dies as a "connection hiccup". 800s is the Pro plan ceiling — the
+// "10 minutes at least" document-generation window.
+export const maxDuration = 800;
 
 const KINDS = new Set(["open", "text", "chip", "form"]);
 

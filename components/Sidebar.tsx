@@ -74,6 +74,41 @@ function startNewEnquiry() {
   window.location.href = "/";
 }
 
+/** Delete one enquiry (confirm → API → refresh); owner-only server side. */
+async function deleteEnquiry(q: SidebarEnquiry, refresh: () => void) {
+  const label = q.deal_id || q.lead_ref;
+  if (!window.confirm(`Delete ${label}? The chat and its files go with it — this cannot be undone.`)) {
+    return;
+  }
+  try {
+    const token = await getAccessToken();
+    const r = await fetch("/api/me/enquiries", {
+      method: "DELETE",
+      headers: {
+        "content-type": "application/json",
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ lead_ref: q.lead_ref }),
+    });
+    if (!r.ok) throw new Error(`status ${r.status}`);
+    // Deleting the conversation that's open in the chat? Start clean.
+    let openSession: string | null = null;
+    try {
+      openSession =
+        localStorage.getItem("xor_session_id") ?? sessionStorage.getItem("xor_session_id");
+    } catch {
+      openSession = null;
+    }
+    if (q.session_id && q.session_id === openSession) {
+      startNewEnquiry();
+      return;
+    }
+    refresh();
+  } catch {
+    window.alert("Couldn't delete that enquiry — try again in a moment.");
+  }
+}
+
 export default function Sidebar(props: Props) {
   const isHome = props.page === "home";
   const onExpired = props.page === "home" ? props.onExpired : null;
@@ -181,27 +216,44 @@ export default function Sidebar(props: Props) {
             ? `/?resume=${encodeURIComponent(q.session_id)}`
             : `/account?deal=${encodeURIComponent(key)}`;
           return (
-            <Link
-              key={key}
-              className="app-row"
-              href={href}
-              onClick={(e) => {
-                // Same-route ?resume= navigation never remounts the chat —
-                // hand the switch to the Chat pane directly instead.
-                if (q.session_id && window.location.pathname === "/") {
-                  e.preventDefault();
-                  window.dispatchEvent(
-                    new CustomEvent("xor:resume", { detail: q.session_id }),
-                  );
-                }
-              }}
-            >
-              <span className="app-row-top">
-                <span className="app-row-id">{key}</span>
-                <span className="app-row-date">{shortDate(q.created_at)}</span>
-              </span>
-              <span className="app-row-sum">{q.summary || "New enquiry"}</span>
-            </Link>
+            <div key={key} className="app-row-wrap">
+              <Link
+                className="app-row"
+                href={href}
+                onClick={(e) => {
+                  // Same-route ?resume= navigation never remounts the chat —
+                  // hand the switch to the Chat pane directly instead.
+                  if (q.session_id && window.location.pathname === "/") {
+                    e.preventDefault();
+                    window.dispatchEvent(
+                      new CustomEvent("xor:resume", { detail: q.session_id }),
+                    );
+                  }
+                }}
+              >
+                <span className="app-row-top">
+                  <span className="app-row-id">{key}</span>
+                  <span className="app-row-date">{shortDate(q.created_at)}</span>
+                </span>
+                <span className="app-row-sum">{q.summary || "New enquiry"}</span>
+              </Link>
+              <button
+                type="button"
+                className="app-row-del"
+                aria-label={`Delete ${key}`}
+                title="Delete this enquiry"
+                onClick={() => void deleteEnquiry(q, () => setTick((t) => t + 1))}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path
+                    d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m3 0-.8 12.1a2 2 0 0 1-2 1.9H8.8a2 2 0 0 1-2-1.9L6 7"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
+            </div>
           );
         })
       );

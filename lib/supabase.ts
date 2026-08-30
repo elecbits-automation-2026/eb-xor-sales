@@ -166,6 +166,12 @@ export interface Db {
   insertLeadFile(file: LeadFileRow): Promise<void>;
   leadFiles(sessionId: string): Promise<LeadFileRow[]>;
   linkLeadFiles(sessionId: string, leadId: string): Promise<void>;
+  /**
+   * Hard-delete one enquiry: the lead, its files, retries, and (when a
+   * session is attached) its transcript, tasks and session row. The register
+   * rows and any Drive folders are the system of record and stay.
+   */
+  deleteEnquiry(leadId: string, sessionId: string | null): Promise<void>;
   /** Record that a staged upload has already been delivered into Drive. */
   markLeadFileDelivered(sessionId: string, storagePath: string, driveFileId: string): Promise<void>;
 
@@ -423,6 +429,22 @@ class SupabaseDb implements Db {
         .eq("session_id", sessionId)
         .eq("storage_path", storagePath),
     );
+  }
+
+  async deleteEnquiry(leadId: string, sessionId: string | null): Promise<void> {
+    // Children before parents; each check throws on a real DB error so a
+    // half-deleted enquiry never passes silently.
+    SupabaseDb.check(await this.client.from("lead_files").delete().eq("lead_id", leadId));
+    SupabaseDb.check(await this.client.from("handoff_retries").delete().eq("lead_id", leadId));
+    if (sessionId) {
+      SupabaseDb.check(await this.client.from("lead_files").delete().eq("session_id", sessionId));
+      SupabaseDb.check(await this.client.from("messages").delete().eq("session_id", sessionId));
+      SupabaseDb.check(await this.client.from("tasks").delete().eq("session_id", sessionId));
+    }
+    SupabaseDb.check(await this.client.from("leads").delete().eq("id", leadId));
+    if (sessionId) {
+      SupabaseDb.check(await this.client.from("sessions").delete().eq("id", sessionId));
+    }
   }
 
   async insertHandoffRetry(
@@ -837,6 +859,19 @@ class MemoryDb implements Db {
     for (const f of this.s.leadFiles) {
       if (f.session_id === sessionId && f.storage_path === storagePath)
         f.drive_file_id = driveFileId;
+    }
+  }
+
+  async deleteEnquiry(leadId: string, sessionId: string | null): Promise<void> {
+    this.s.leadFiles = this.s.leadFiles.filter(
+      (f) => f.lead_id !== leadId && (!sessionId || f.session_id !== sessionId),
+    );
+    this.s.retries = this.s.retries.filter((r) => r.lead_id !== leadId);
+    this.s.leads.delete(leadId);
+    if (sessionId) {
+      this.s.messages.delete(sessionId);
+      this.s.tasks = this.s.tasks.filter((t) => t.session_id !== sessionId);
+      this.s.sessions.delete(sessionId);
     }
   }
 

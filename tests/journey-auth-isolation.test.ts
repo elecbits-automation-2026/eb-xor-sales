@@ -24,7 +24,7 @@ import { NextRequest } from "next/server";
 
 import { POST as chatPost } from "@/app/api/chat/route";
 import { GET as downloadGet } from "@/app/api/download/[session]/[file]/route";
-import { GET as enquiriesGet } from "@/app/api/me/enquiries/route";
+import { DELETE as enquiriesDelete, GET as enquiriesGet } from "@/app/api/me/enquiries/route";
 import { GET as transcriptGet } from "@/app/api/me/transcript/route";
 import { POST as mockAuthPost } from "@/app/api/mock-auth/route";
 import { resetMemoryAuth } from "@/lib/auth-server";
@@ -305,4 +305,49 @@ describe("cross-user isolation after A completes an ODM intake", () => {
     expect((await download(sidA, "LLD-draft-XOR-99999999-999.pdf")).status).toBe(404);
     expect((await download(sidA, "nope.pdf")).status).toBe(404);
   }, 40_000);
+});
+
+describe("enquiry deletion", () => {
+  it("owner-only: forecloses cross-account deletes, then removes everything", async () => {
+    const ipA = nextIp();
+    const ipB = nextIp();
+    const tokenA = await signup("owner@acme.in", ipA, "Owner A");
+    const tokenB = await signup("intruder@rival.in", ipB, "Intruder B");
+    const { sid } = await throughOrgSize("owner@acme.in", ipA, tokenA);
+
+    const listed = await (await meEnquiries(tokenA)).json();
+    expect(listed.enquiries.length).toBe(1);
+    const leadRef = listed.enquiries[0].lead_ref as string;
+
+    const del = (token: string | undefined, lead_ref: string) =>
+      enquiriesDelete(
+        new NextRequest("http://test/api/me/enquiries", {
+          method: "DELETE",
+          body: JSON.stringify({ lead_ref }),
+          headers: {
+            "content-type": "application/json",
+            ...(token ? { authorization: `Bearer ${token}` } : {}),
+          },
+        }),
+      );
+
+    // No token → 401; another account → 404; A's list survives both.
+    expect((await del(undefined, leadRef)).status).toBe(401);
+    expect((await del(tokenB, leadRef)).status).toBe(404);
+    expect(
+      ((await (await meEnquiries(tokenA)).json()) as { enquiries: unknown[] }).enquiries.length,
+    ).toBe(1);
+
+    // The owner's delete removes the row AND the conversation behind it.
+    expect((await del(tokenA, leadRef)).status).toBe(200);
+    expect(
+      ((await (await meEnquiries(tokenA)).json()) as { enquiries: unknown[] }).enquiries.length,
+    ).toBe(0);
+    const db = (await import("@/lib/supabase")).getDb();
+    expect(await db.getSession(sid)).toBeNull();
+    expect((await db.recentMessages(sid, 10)).length).toBe(0);
+
+    // Deleting it again: cleanly gone.
+    expect((await del(tokenA, leadRef)).status).toBe(404);
+  }, 30_000);
 });

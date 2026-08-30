@@ -11,8 +11,8 @@ import { exportKbFileText, listKbFiles } from "@/lib/drive";
 import { embed, embedderId, embeddingsAvailable } from "@/lib/embeddings";
 import { getDb, type KbChunkInput } from "@/lib/supabase";
 
-export const maxDuration = 300;
-const TIME_BUDGET_MS = 240_000; // stop early; the next run resumes via modifiedTime
+export const maxDuration = 800; // Pro plan ceiling
+const TIME_BUDGET_MS = 700_000; // stop early; the next run resumes via modifiedTime
 const EMBEDDER_KEY = "kb:embedder";
 
 const CHUNK_SIZE = 1500;

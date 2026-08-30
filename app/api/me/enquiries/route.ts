@@ -62,3 +62,39 @@ export async function GET(req: NextRequest) {
     enquiries,
   });
 }
+
+/**
+ * Delete one of the signed-in client's own enquiries: the lead, its files,
+ * transcript, tasks and session. Ownership is enforced by looking the lead
+ * up ONLY within the authed client's list — an id from another account
+ * simply isn't found. Register rows and Drive folders stay (system of
+ * record; clean those up in Drive/the register itself).
+ */
+export async function DELETE(req: NextRequest) {
+  const user = await getUserFromRequest(req);
+  if (!user) {
+    return NextResponse.json({ detail: "sign in first" }, { status: 401 });
+  }
+  let body: { lead_ref?: string };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ detail: "invalid JSON" }, { status: 400 });
+  }
+  if (!body.lead_ref) {
+    return NextResponse.json({ detail: "lead_ref required" }, { status: 400 });
+  }
+
+  const db = getDb();
+  const client = await db.findClientByAuthUserId(user.id);
+  if (!client) {
+    return NextResponse.json({ detail: "no projects for this account" }, { status: 404 });
+  }
+  const lead = (await db.leadsForClient(client.id)).find((l) => l.lead_ref === body.lead_ref);
+  if (!lead) {
+    return NextResponse.json({ detail: "enquiry not found" }, { status: 404 });
+  }
+  await db.deleteEnquiry(lead.id, lead.session_id ?? null);
+  console.info(`xor enquiry deleted lead=${lead.lead_ref} by=${user.id}`);
+  return NextResponse.json({ ok: true });
+}
