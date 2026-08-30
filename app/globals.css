@@ -704,6 +704,11 @@ button {
   background: var(--s2);
   animation: mic-pulse 1.4s ease-in-out infinite;
 }
+/* Speaker (XoR's voice output) — muted state reads clearly dimmed. */
+.mic.spk.off {
+  color: var(--txt3, var(--txt2));
+  opacity: 0.55;
+}
 :root[data-theme="dark"] .mic.rec {
   color: #f47272;
 }

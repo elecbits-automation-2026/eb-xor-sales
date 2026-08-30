@@ -457,12 +457,12 @@ describe("open on an existing session", () => {
     expect(open1.history).toEqual(expected1);
     expect(open1.messages[0]).toContain("must-have features");
 
-    // Reload #2: exactly ONE assistant message (reload #1's resume prompt)
-    // was appended — nothing from the transcript was stored twice.
-    const expected2 = [...transcript];
-    expect(expected2.length).toBe(expected1.length + open1.messages.length);
-    const open2 = await rchat({ session_id: sid, kind: "open" });
-    expect(open2.history).toEqual(expected2);
+    // Reload #2: re-presented resume prompts are never persisted, so the
+    // stored transcript is EXACTLY what it was before reload #1 — repeated
+    // reloads must not stack "where were we" lines (the triple
+    // "This enquiry is logged…" bug).
+    const open2 = await chat({ session_id: sid, kind: "open" });
+    expect(open2.history).toEqual(expected1);
 
     // Belt and braces: each user turn appears exactly once.
     expect(open2.history!.filter((m) => m.role === "user")).toEqual([

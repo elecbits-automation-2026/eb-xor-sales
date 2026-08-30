@@ -292,6 +292,66 @@ export async function answerQuestion(history_: Msg[], userText: string): Promise
 }
 
 // ─────────────────────────── LLD generation ──────────────────────────────
+/**
+ * Long-document author shared by the LLD and benchmark generators: retries
+ * a failed attempt once, continues a max_tokens-truncated draft in place,
+ * and REFUSES to return junk — a document under minChars is a failure, not
+ * a deliverable. Callers surface the failure honestly; there is no silent
+ * template fallback in real mode (a hollow shell reaching a customer is
+ * strictly worse than an honest retry).
+ */
+async function authorDoc(p: {
+  system: ReturnType<typeof systemBlocks>;
+  userContent: string;
+  maxTokens: number;
+  searches: number;
+  minChars: number;
+  label: string;
+}): Promise<string> {
+  let lastErr: unknown = new Error(`${p.label}: no attempt ran`);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const msgs: Anthropic.MessageParam[] = [{ role: "user", content: p.userContent }];
+      let resp = await createResuming(
+        {
+          model: cfg.model,
+          max_tokens: p.maxTokens,
+          system: p.system,
+          tools: [webSearchTool(p.searches)],
+        },
+        msgs,
+      );
+      let text = joinText(resp.content);
+      // Ran out of output budget mid-document → continue where it stopped
+      // (tools off — the research happened in the first pass).
+      for (let cont = 0; cont < 2 && resp.stop_reason === "max_tokens" && text; cont++) {
+        msgs.push(
+          { role: "assistant", content: joinText(resp.content) },
+          {
+            role: "user",
+            content:
+              "Continue the document from EXACTLY where it stopped — no " +
+              "preamble, no repetition; finish every remaining section.",
+          },
+        );
+        resp = await createResuming(
+          { model: cfg.model, max_tokens: p.maxTokens, system: p.system },
+          msgs,
+        );
+        text += joinText(resp.content);
+      }
+      const clean = stripCites(text).trim();
+      if (clean.length >= p.minChars) return clean;
+      lastErr = new Error(`${p.label} came back too thin (${clean.length} chars)`);
+      console.error(String(lastErr));
+    } catch (err) {
+      lastErr = err;
+      console.error(`${p.label} attempt ${attempt + 1} failed:`, err);
+    }
+  }
+  throw lastErr;
+}
+
 export async function generateLld(
   slots: Record<string, string>,
   contact: Record<string, string>,
@@ -310,40 +370,31 @@ export async function generateLld(
     .slice(-30)
     .map((m) => `${m.role === "user" ? "Customer" : "XoR"}: ${m.content.slice(0, 280)}`)
     .join("\n");
-  try {
-    const brain = await brainContext(); // never throws — cached text or ""
-    // Pull the most relevant company material for THIS product from the
-    // pgvector KB — reference designs, SOP sections, past LLD patterns.
-    const query = [slots.product_concept, slots.key_features].filter(Boolean).join(" — ");
-    const chunks = query ? await retrieveContext(query) : [];
-    const resp = await createResuming(
-      {
-        model: cfg.model,
-        max_tokens: 3000,
-        system: systemBlocks(buildLldSystem(brain), kbBackground(chunks.slice(0, 6))),
-        tools: [webSearchTool(5)], // pull real benchmark specs when refs are missing
-      },
-      [
-        {
-          role: "user",
-          content:
-            `Intake ref ${leadRef} for ${contact["company"] ?? "the customer"}.\n` +
-            `Intake answers:\n${brief}\n\n` +
-            (convo ? `Conversation transcript:\n${convo}\n\n` : "") +
-            (revision
-              ? `Previous draft:\n${revision.prior.slice(0, 12000)}\n\n` +
-                `The customer reviewed it and asks:\n${revision.feedback}\n\n` +
-                `Rewrite the COMPLETE LLD applying the requested changes (all ten sections).`
-              : `Write the LLD draft.`),
-        },
-      ],
-    );
-    const text = joinText(resp.content);
-    return text || templateLld(slots, contact, leadRef);
-  } catch (err) {
-    console.error("LLD generation failed; using template:", err);
-    return templateLld(slots, contact, leadRef);
-  }
+  const brain = await brainContext(); // never throws — cached text or ""
+  // The REAL Elecbits LLD templates (Sales Collateral / LLD) are the
+  // authoritative shape of the document; the playbook is the method.
+  const { lldTemplatesText } = await import("./drive");
+  const houseTpl = await lldTemplatesText().catch(() => "");
+  // Pull the most relevant company material for THIS product from the
+  // pgvector KB — reference designs, SOP sections, past LLD patterns.
+  const query = [slots.product_concept, slots.key_features].filter(Boolean).join(" — ");
+  const chunks = query ? await retrieveContext(query) : [];
+  return authorDoc({
+    system: systemBlocks(buildLldSystem(brain, houseTpl), kbBackground(chunks.slice(0, 6))),
+    userContent:
+      `Intake ref ${leadRef} for ${contact["company"] ?? "the customer"}.\n` +
+      `Intake answers:\n${brief}\n\n` +
+      (convo ? `Conversation transcript:\n${convo}\n\n` : "") +
+      (revision
+        ? `Previous draft:\n${revision.prior.slice(0, 12000)}\n\n` +
+          `The customer reviewed it and asks:\n${revision.feedback}\n\n` +
+          `Rewrite the COMPLETE LLD applying the requested changes (every section).`
+        : `Write the LLD draft.`),
+    maxTokens: 8000,
+    searches: 5,
+    minChars: 4000,
+    label: "LLD generation",
+  });
 }
 
 // ──────────── Product Definition & Benchmark Report (Outcome A) ───────────
@@ -364,38 +415,25 @@ export async function generateBenchmark(
     .slice(-40)
     .map((m) => `${m.role === "user" ? "Customer" : "XoR"}: ${m.content.slice(0, 400)}`)
     .join("\n");
-  try {
-    const brain = await brainContext(); // never throws — cached text or ""
-    const query = [slots.product_concept, slots.key_features].filter(Boolean).join(" — ");
-    const chunks = query ? await retrieveContext(query) : [];
-    const resp = await createResuming(
-      {
-        model: cfg.model,
-        max_tokens: 4000,
-        system: systemBlocks(buildBenchmarkSystem(brain), kbBackground(chunks.slice(0, 4))),
-        tools: [webSearchTool(8)], // the bench: re-verify listings, fill gaps
-      },
-      [
-        {
-          role: "user",
-          content:
-            `Intake ref ${leadRef} for ${contact["company"] ?? "the customer"}.\n` +
-            `Intake answers:\n${brief}\n\n` +
-            (convo ? `Conversation transcript:\n${convo}\n\n` : "") +
-            (revision
-              ? `Previous report:\n${revision.prior.slice(0, 12000)}\n\n` +
-                `The customer reviewed it and asks:\n${revision.feedback}\n\n` +
-                `Rewrite the COMPLETE report applying the requested changes.`
-              : `Write the Product Definition & Benchmark Report.`),
-        },
-      ],
-    );
-    const text = joinText(resp.content);
-    return text || templateBenchmark(slots, contact, leadRef);
-  } catch (err) {
-    console.error("benchmark generation failed; using template:", err);
-    return templateBenchmark(slots, contact, leadRef);
-  }
+  const brain = await brainContext(); // never throws — cached text or ""
+  const query = [slots.product_concept, slots.key_features].filter(Boolean).join(" — ");
+  const chunks = query ? await retrieveContext(query) : [];
+  return authorDoc({
+    system: systemBlocks(buildBenchmarkSystem(brain), kbBackground(chunks.slice(0, 4))),
+    userContent:
+      `Intake ref ${leadRef} for ${contact["company"] ?? "the customer"}.\n` +
+      `Intake answers:\n${brief}\n\n` +
+      (convo ? `Conversation transcript:\n${convo}\n\n` : "") +
+      (revision
+        ? `Previous report:\n${revision.prior.slice(0, 12000)}\n\n` +
+          `The customer reviewed it and asks:\n${revision.feedback}\n\n` +
+          `Rewrite the COMPLETE report applying the requested changes.`
+        : `Write the Product Definition & Benchmark Report.`),
+    maxTokens: 8000,
+    searches: 8, // the bench: re-verify listings, fill gaps
+    minChars: 3000,
+    label: "benchmark generation",
+  });
 }
 
 // ───────────────────────── mock triage rules ─────────────────────────────

@@ -54,6 +54,8 @@ Style rules:
 - You are the entire front door — there is no sales team behind you. Never
   defer work to a human during intake; when asked for baselines or
   benchmarks, propose them yourself.
+- Do not bring up meetings or engineering calls. If asked: a call happens
+  only AFTER the project is sanctioned — the sanction comes first.
 
 You MUST respond by calling the report_triage tool exactly once.`;
 
@@ -156,6 +158,11 @@ Strategy rules for next_question:
   question, capture it as TBD and keep moving: the engineering review
   refines TBDs after filing. Older turns in the conversation may contain a
   legacy "connect me to sales" offer — never repeat or reference it.
+- Do not bring up meetings or engineering calls — the deliverable is what
+  this conversation produces. If the customer asks about a call, the
+  sequence is fixed: the project gets sanctioned first; an engineering
+  call happens only after sanction. Never park a decision "for the call" —
+  resolve it here or record it as TBD.
 - To correct an earlier wrong value, overwrite it in updates (with the
   right value, or "TBD") — values cannot be deleted, only replaced.
 - You have the web_search tool. When the customer references real products,
@@ -206,15 +213,32 @@ rules (§4 — the 14-section Designer template, document conventions, the
 ER-nn/FT-nn/OI-n traceability spine, honesty mechanics), quality gates
 (§5) and the copy-ready skeleton (§6). Use pipe tables for every table.
 Use the web_search tool for public reference-product specs when the intake
-lacks anchors. Dense engineering content, 2,000–3,500 words plus tables;
-never filler — a section with nothing real gets its two-line placeholder
-and an OI row.`;
+lacks anchors. Dense engineering content, 2,500–3,500 words plus tables.
+HARD RULES: never write "to be drafted", "to be proposed", "engineering to
+complete", or defer content to a later session or call — make the
+engineering call yourself, with concrete candidate parts, values and
+calculations, and mark it (assumption) with an OI row when unconfirmed. A
+section that ships hollow is a defect.`;
 
-export function buildLldSystem(brain = ""): string {
+/** Structural authority when the house templates are available. */
+function houseTemplateSection(tpl: string): string {
+  if (!tpl) return "";
+  return `
+
+--- HOUSE LLD TEMPLATES (Sales Collateral / LLD — THE authoritative shape) ---
+These are Elecbits' real LLD documents. Mirror their section structure,
+headings, numbering, table formats and tone EXACTLY — the playbook governs
+method and completeness, the house template governs shape; where they
+disagree on structure, the house template wins.
+
+${tpl}`;
+}
+
+export function buildLldSystem(brain = "", houseTemplates = ""): string {
   return `${LLD_AUTHOR}
 
 --- LLD PLAYBOOK ---
-${LLD_PLAYBOOK}${brainSection(brain)}`;
+${LLD_PLAYBOOK}${houseTemplateSection(houseTemplates)}${brainSection(brain)}`;
 }
 
 const BENCH_AUTHOR = `You are the XOR product-definition engine — a senior Elecbits
@@ -226,7 +250,8 @@ review-mining implications, MoSCoW, Target Specifications, Open Decisions
 and Decision Log are all tables. Use the web_search tool to (re)verify
 every listing named in the conversation; every price dated; anything not
 read from a live page marked unverified; never invent listing data.
-1,500–3,000 words plus tables.`;
+2,000–3,000 words plus tables. Never defer a section to a later meeting or
+review — fill it with real, sourced content or an explicit Open Decision.`;
 
 export function buildBenchmarkSystem(brain = ""): string {
   return `${BENCH_AUTHOR}
@@ -360,5 +385,5 @@ benchmark products and typical spec ranges from the web and use them
 Rules: ground every statement in the intake answers, the conversation, or
 the reference documents; mark anything you inferred with "(assumption)";
 never state prices or committed dates as promises (cost FEASIBILITY
-commentary is expected); target 1,500–2,500 words. This draft accelerates
-the first engineering call — it should read like Elecbits wrote it.`;
+commentary is expected); target 1,500–2,500 words. This is the document
+the project gets sanctioned on — it should read like Elecbits wrote it.`;

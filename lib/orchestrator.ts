@@ -481,8 +481,8 @@ async function setTrack(s: SessionRow, track: Track): Promise<ChatOut> {
   const intro = {
     ODM:
       "New product design it is. Quick coordinates first, then seven short " +
-      "questions — at the end I'll draft a first-cut LLD (low-level design) " +
-      "you can take into the engineering call.",
+      "questions — at the end I'll turn them into your deliverable: a " +
+      "benchmark-backed product definition or a build-ready LLD.",
     EMS:
       "Manufacturing it is. Quick coordinates first, then I'll walk you " +
       "through the build package we need for an accurate quote.",
@@ -841,6 +841,14 @@ async function storeDoc(s: SessionRow, kind: "lld" | "bench", md: string): Promi
     return pdfName;
   } catch (err) {
     console.error(`${kind} pdf generation failed — serving markdown instead`, err);
+    // Surface it: a customer receiving .md instead of the branded PDF is a
+    // defect someone must see, not a silent downgrade.
+    await noteTask(
+      s.id,
+      "Render branded PDF",
+      "failed",
+      `${err instanceof Error ? err.message.slice(0, 120) : "pdf engine error"} — sent markdown`,
+    );
     set(mdName, mdPath);
     return mdName;
   }
@@ -872,21 +880,34 @@ async function odmBenchReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
     const prior = mdPath ? await db.getObject(mdPath) : null;
     const priorMd = prior ? new TextDecoder().decode(prior) : "";
     const transcript = await db.recentMessages(s.id, 60);
-    const fname = await trackTask(
-      s.id,
-      "Revise the benchmark report",
-      async () => {
-        const benchMd = await llm.generateBenchmark(
-          s.data.slots,
-          s.data.contact,
-          s.data.lead_ref ?? "XOR",
-          transcript,
-          { prior: priorMd, feedback },
-        );
-        return storeDoc(s, "bench", benchMd);
-      },
-      { detail: (f) => f },
-    );
+    let fname: string;
+    try {
+      fname = await trackTask(
+        s.id,
+        "Revise the benchmark report",
+        async () => {
+          const benchMd = await llm.generateBenchmark(
+            s.data.slots,
+            s.data.contact,
+            s.data.lead_ref ?? "XOR",
+            transcript,
+            { prior: priorMd, feedback },
+          );
+          return storeDoc(s, "bench", benchMd);
+        },
+        { detail: (f) => f, failDetail: "revision failed — current report untouched" },
+      );
+    } catch (err) {
+      console.error(`benchmark revision failed session=${s.id}`, err);
+      return out(
+        s,
+        [
+          "That rewrite pass failed on my side — your current report is " +
+            "untouched. Tell me the changes again, or lock it as is.",
+        ],
+        [chips(BENCH_REVIEW_CHIPS)],
+      );
+    }
     return out(
       s,
       ["Rewritten with your changes. Another pass, or lock it and move to the LLD?"],
@@ -916,21 +937,34 @@ async function odmLldReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
     const prior = mdPath ? await db.getObject(mdPath) : null;
     const priorMd = prior ? new TextDecoder().decode(prior) : "";
     const transcript = await db.recentMessages(s.id, 40);
-    const fname = await trackTask(
-      s.id,
-      "Revise the LLD",
-      async () => {
-        const lldMd = await llm.generateLld(
-          s.data.slots,
-          s.data.contact,
-          s.data.lead_ref ?? "XOR",
-          transcript,
-          { prior: priorMd, feedback },
-        );
-        return storeDoc(s, "lld", lldMd);
-      },
-      { detail: (f) => f },
-    );
+    let fname: string;
+    try {
+      fname = await trackTask(
+        s.id,
+        "Revise the LLD",
+        async () => {
+          const lldMd = await llm.generateLld(
+            s.data.slots,
+            s.data.contact,
+            s.data.lead_ref ?? "XOR",
+            transcript,
+            { prior: priorMd, feedback },
+          );
+          return storeDoc(s, "lld", lldMd);
+        },
+        { detail: (f) => f, failDetail: "revision failed — current draft untouched" },
+      );
+    } catch (err) {
+      console.error(`LLD revision failed session=${s.id}`, err);
+      return out(
+        s,
+        [
+          "That rewrite pass failed on my side — your current draft is " +
+            "untouched. Tell me the changes again, or file it as is.",
+        ],
+        [chips(LLD_REVIEW_CHIPS)],
+      );
+    }
     return out(
       s,
       ["Rewritten with your changes. Take another look — more edits, or shall I file it?"],
@@ -953,20 +987,33 @@ async function odmReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
       // benchmark playbook — its §6 table then anchors the LLD.
       if (!s.data.lead_ref) s.data.lead_ref = await db.nextLeadRef();
       const transcript = await db.recentMessages(s.id, 60);
-      const fname = await trackTask(
-        s.id,
-        "Draft the benchmark report",
-        async () => {
-          const benchMd = await llm.generateBenchmark(
-            s.data.slots,
-            s.data.contact,
-            s.data.lead_ref!,
-            transcript,
-          );
-          return storeDoc(s, "bench", benchMd);
-        },
-        { detail: (f) => f },
-      );
+      let fname: string;
+      try {
+        fname = await trackTask(
+          s.id,
+          "Draft the benchmark report",
+          async () => {
+            const benchMd = await llm.generateBenchmark(
+              s.data.slots,
+              s.data.contact,
+              s.data.lead_ref!,
+              transcript,
+            );
+            return storeDoc(s, "bench", benchMd);
+          },
+          { detail: (f) => f, failDetail: "generation failed — hit the chip to retry" },
+        );
+      } catch (err) {
+        console.error(`benchmark generation failed session=${s.id}`, err);
+        return out(
+          s,
+          [
+            "The report engine stumbled mid-draft — nothing half-baked was " +
+              "filed. Hit the chip and I'll write it again.",
+          ],
+          [chips(reviewChips())],
+        );
+      }
       s.state = "ODM_BENCH_REVIEW";
       return out(
         s,
@@ -990,20 +1037,34 @@ async function odmReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
     if (inp.chip_id === "lld:generate") {
       if (!s.data.lead_ref) s.data.lead_ref = await db.nextLeadRef();
       const transcript = await db.recentMessages(s.id, 40);
-      const fname = await trackTask(
-        s.id,
-        "Draft the LLD",
-        async () => {
-          const lldMd = await llm.generateLld(
-            s.data.slots,
-            s.data.contact,
-            s.data.lead_ref!,
-            transcript,
-          );
-          return storeDoc(s, "lld", lldMd);
-        },
-        { detail: (f) => f },
-      );
+      let fname: string;
+      try {
+        fname = await trackTask(
+          s.id,
+          "Draft the LLD",
+          async () => {
+            const lldMd = await llm.generateLld(
+              s.data.slots,
+              s.data.contact,
+              s.data.lead_ref!,
+              transcript,
+            );
+            return storeDoc(s, "lld", lldMd);
+          },
+          { detail: (f) => f, failDetail: "generation failed — hit the chip to retry" },
+        );
+      } catch (err) {
+        console.error(`LLD generation failed session=${s.id}`, err);
+        return out(
+          s,
+          [
+            "The LLD engine stumbled mid-draft — I don't file half-baked " +
+              "documents, so nothing was stored. Hit the chip and I'll " +
+              "write it again.",
+          ],
+          [chips(reviewChips().filter((c) => c.id !== "bench:generate" || !s.data.bench_path))],
+        );
+      }
       // The draft is EDITABLE — iterate with the customer until it reads
       // right, exactly like working a doc in Claude; only then file it.
       s.state = "ODM_LLD_REVIEW";
@@ -1422,7 +1483,7 @@ async function finalizeWork(s: SessionRow): Promise<ChatOut> {
   d.finalized = true;
   const first = (c.name ?? "").split(/\s+/)[0] ?? "";
   const trackLines: Record<string, string> = {
-    ODM: "the engineering team will review the requirement and your LLD draft, then set up an architecture call",
+    ODM: "your requirement and documents go in for project sanction — once the project is sanctioned, the build is scheduled",
     EMS: "the team will review your build package and come back with clarifications and a quote plan",
     PRODUCT: "the team will share the matching catalogue and pricing",
   };
@@ -1438,7 +1499,7 @@ async function finalizeWork(s: SessionRow): Promise<ChatOut> {
     s,
     [msg],
     [
-      card("What happens next", "1. Sales engineering review\n2. Scoping call\n3. Proposal", links),
+      card("What happens next", "1. Requirement review\n2. Project sanction\n3. Build kicks off", links),
       chips([{ id: "restart", label: "Start another enquiry" }]),
     ],
   );
