@@ -118,37 +118,61 @@ export async function resolveRegister(): Promise<Binding> {
 }
 
 // ── the accounts parent folder (client folders live here) ─────────────────
+// v2 cache key: client folders bind to the "01-Accounts / Clients" subfolder
+// INSIDE Eb-07-Sales (the sales tree keeps charters/pipeline as siblings),
+// falling back to creating that subfolder when it doesn't exist yet.
+const ACCOUNTS_KEY = "google:accounts_folder:v2";
+const ACCOUNTS_SUBFOLDER = "01-Accounts / Clients";
+
+async function createFolder(name: string, parent: string): Promise<string> {
+  const created = await driveApi().files.create({
+    requestBody: { name, mimeType: FOLDER_MIME, parents: [parent] },
+    fields: "id",
+    supportsAllDrives: true,
+  });
+  return created.data.id as string;
+}
+
 export async function resolveAccountsFolder(): Promise<Binding> {
   if (cfg.accountsParentFolderId) {
     return { id: cfg.accountsParentFolderId, name: "(pinned by env)" };
   }
-  const hit = await cached("google:accounts_folder");
+  const hit = await cached(ACCOUNTS_KEY);
   if (hit) return hit;
 
+  // 1. the Eb-07-Sales container (found, or created inside the ULM folder)
+  let sales: { id: string; name: string };
   const existing = await search(`name = '${SALES_FOLDER}' and mimeType = '${FOLDER_MIME}'`);
   if (existing.length) {
-    const b: Binding = { id: existing[0].id, name: existing[0].name };
-    await remember("google:accounts_folder", b);
-    console.info(`xor google: bound accounts folder → "${b.name}" (${b.id})`);
-    return b;
+    sales = existing[0];
+  } else {
+    const ulm = await search(`name contains '${ULM_HINT}' and mimeType = '${FOLDER_MIME}'`);
+    if (!ulm.length) {
+      throw new Error(
+        `Neither an "${SALES_FOLDER}" folder nor the central "${ULM_HINT}" folder is ` +
+          `visible to the bot — share the ULM folder with the service account as Editor, ` +
+          `or pin a folder with ACCOUNTS_PARENT_FOLDER_ID.`,
+      );
+    }
+    sales = { id: await createFolder(SALES_FOLDER, ulm[0].id), name: SALES_FOLDER };
+    console.info(`xor google: created "${SALES_FOLDER}" inside "${ulm[0].name}"`);
   }
 
-  const ulm = await search(`name contains '${ULM_HINT}' and mimeType = '${FOLDER_MIME}'`);
-  if (!ulm.length) {
-    throw new Error(
-      `Neither an "${SALES_FOLDER}" folder nor the central "${ULM_HINT}" folder is ` +
-        `visible to the bot — share the ULM folder with the service account as Editor, ` +
-        `or pin a folder with ACCOUNTS_PARENT_FOLDER_ID.`,
-    );
+  // 2. client folders live in the Accounts subfolder, never at the root
+  const children = await search(`'${sales.id}' in parents and mimeType = '${FOLDER_MIME}'`);
+  let acct = children.find((c) => /accounts/i.test(c.name));
+  let created = false;
+  if (!acct) {
+    acct = {
+      id: await createFolder(ACCOUNTS_SUBFOLDER, sales.id),
+      name: ACCOUNTS_SUBFOLDER,
+      mimeType: FOLDER_MIME,
+    };
+    created = true;
   }
-  const created = await driveApi().files.create({
-    requestBody: { name: SALES_FOLDER, mimeType: FOLDER_MIME, parents: [ulm[0].id] },
-    fields: "id",
-    supportsAllDrives: true,
-  });
-  const b: Binding = { id: created.data.id as string, name: SALES_FOLDER, created: true };
-  await remember("google:accounts_folder", b);
-  console.info(`xor google: created accounts folder "${SALES_FOLDER}" inside "${ulm[0].name}"`);
+  const b: Binding = { id: acct.id, name: `${sales.name} / ${acct.name}`, created };
+  await remember(ACCOUNTS_KEY, b);
+  console.info(`xor google: bound accounts folder → "${b.name}" (${b.id})`);
   return b;
 }
 
