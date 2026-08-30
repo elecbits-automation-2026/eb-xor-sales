@@ -18,9 +18,11 @@ import {
   TOOL_SLOTS,
   TOOL_TRIAGE,
   buildLldSystem,
-  buildQaSystem,
+  buildQaStable,
   buildSlotsSystem,
-  buildTriageSystem,
+  buildTriageStable,
+  kbBackground,
+  qaExcerpts,
 } from "@/lib/prompts";
 import type { Msg, Track, TriageTrack } from "@/lib/widgets";
 
@@ -41,26 +43,32 @@ function getClient(): Anthropic {
 }
 
 /**
- * System prompt as an explicitly cacheable block. The brain makes every
- * system prompt large (tens of KB) yet stable for an hour — with
- * cache_control, repeat turns skip re-processing it, which is most of the
- * latency (and cost) of each call and the difference between a chat turn
- * finishing comfortably and a serverless timeout.
+ * System prompt as blocks with a cache breakpoint after the STABLE half.
+ * The brain makes system prompts large (tens of KB) yet stable for an hour;
+ * per-request material (retrieved excerpts) varies every call. Caching only
+ * works on an unchanged prefix — so the stable text carries cache_control
+ * and anything volatile rides in a second, uncached block. This is most of
+ * the latency (and cost) of each opus call.
  */
-function cacheableSystem(text: string): Anthropic.TextBlockParam[] {
-  return [{ type: "text", text, cache_control: { type: "ephemeral" } }];
+function systemBlocks(stable: string, volatile = ""): Anthropic.TextBlockParam[] {
+  const blocks: Anthropic.TextBlockParam[] = [
+    { type: "text", text: stable, cache_control: { type: "ephemeral" } },
+  ];
+  if (volatile.trim()) blocks.push({ type: "text", text: volatile });
+  return blocks;
 }
 
 /** One Claude call that must answer via the given tool; returns its input. */
 async function callTool(
-  system: string,
+  stableSystem: string,
   messages: Anthropic.MessageParam[],
   tool: Anthropic.Tool,
+  volatileSystem = "",
 ): Promise<Record<string, unknown>> {
   const resp = await getClient().messages.create({
     model: cfg.model,
     max_tokens: 1024,
-    system: cacheableSystem(system),
+    system: systemBlocks(stableSystem, volatileSystem),
     messages,
     tools: [tool],
     tool_choice: { type: "tool", name: tool.name },
@@ -120,9 +128,10 @@ export async function triage(history_: Msg[], userText: string): Promise<TriageR
     const chunks = await retrieveContext(userText);
     const brain = await brainContext();
     const out = await callTool(
-      buildTriageSystem(chunks.slice(0, 3), brain),
+      buildTriageStable(brain),
       history(history_, userText),
       TOOL_TRIAGE,
+      kbBackground(chunks.slice(0, 3)),
     );
     return coerceTriage(out);
   } catch (err) {
@@ -206,7 +215,7 @@ export async function answerQuestion(history_: Msg[], userText: string): Promise
     const resp = await getClient().messages.create({
       model: cfg.model,
       max_tokens: 400,
-      system: cacheableSystem(buildQaSystem(chunks, brain)),
+      system: systemBlocks(buildQaStable(chunks.length > 0, brain), qaExcerpts(chunks)),
       messages: history(history_, userText),
     });
     return joinText(resp.content);
@@ -231,10 +240,14 @@ export async function generateLld(
     .join("\n");
   try {
     const brain = await brainContext(); // never throws — cached text or ""
+    // Pull the most relevant company material for THIS product from the
+    // pgvector KB — reference designs, SOP sections, past LLD patterns.
+    const query = [slots.product_concept, slots.key_features].filter(Boolean).join(" — ");
+    const chunks = query ? await retrieveContext(query) : [];
     const resp = await getClient().messages.create({
       model: cfg.model,
       max_tokens: 2048,
-      system: cacheableSystem(buildLldSystem(brain)),
+      system: systemBlocks(buildLldSystem(brain), kbBackground(chunks.slice(0, 6))),
       messages: [
         {
           role: "user",

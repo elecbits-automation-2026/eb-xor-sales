@@ -397,14 +397,59 @@ export interface KbSourceFile {
   sourceFolder: string;
 }
 
+/** Text-bearing types the KB can extract (mirrors exportKbFileText). */
+const KB_TEXT_MIMES = [GDOC_MIME, DOCX_MIME, "application/pdf", "text/plain", "text/markdown"];
+const KB_WHOLE_DRIVE_MAX = 300;
+
+/**
+ * Zero-config source: every text-bearing file the acting account can SEE
+ * (owned or shared), newest first, capped. This is what makes "the bot
+ * studies the whole Drive" true without a single env var.
+ */
+async function listWholeDriveText(): Promise<KbSourceFile[]> {
+  const q =
+    `(${KB_TEXT_MIMES.map((m) => `mimeType = '${m}'`).join(" or ")}) and trashed = false`;
+  const out: KbSourceFile[] = [];
+  let pageToken: string | undefined;
+  do {
+    const res = await drive().files.list({
+      q,
+      orderBy: "modifiedTime desc",
+      fields: "nextPageToken, files(id,name,mimeType,modifiedTime)",
+      pageSize: 100,
+      pageToken,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    });
+    for (const f of res.data.files ?? []) {
+      if (!f.id) continue;
+      out.push({
+        id: f.id,
+        name: f.name ?? "(untitled)",
+        mimeType: f.mimeType ?? "",
+        modifiedTime: f.modifiedTime ?? "",
+        sourceFolder: "drive",
+      });
+      if (out.length >= KB_WHOLE_DRIVE_MAX) return out;
+    }
+    pageToken = res.data.nextPageToken ?? undefined;
+  } while (pageToken);
+  return out;
+}
+
 /**
  * Recursively walk every KB source folder (subfolders included) and return
  * all non-folder files; sourceFolder is the top-level folder each came from.
  * The sentinel "root" (or "*") walks the ENTIRE My Drive of the acting
  * account — meaningful with GOOGLE_IMPERSONATED_USER; curate before using
  * it, since indexed content grounds a customer-facing bot.
+ *
+ * With NO folders configured, the whole visible Drive's text documents are
+ * the source (newest first, capped) — zero-config, like the rest of the
+ * Google discovery.
  */
 export async function listKbFiles(): Promise<KbSourceFile[]> {
+  if (!cfg.kbSourceFolderIds.length) return listWholeDriveText();
   const out: KbSourceFile[] = [];
   for (const rawId of cfg.kbSourceFolderIds) {
     const topId = rawId === "*" ? "root" : rawId;
