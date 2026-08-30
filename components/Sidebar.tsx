@@ -75,6 +75,16 @@ export default function Sidebar(props: Props) {
   const isHome = props.page === "home";
   const onExpired = props.page === "home" ? props.onExpired : null;
   const [home, setHome] = useState<HomeData | "loading">("loading");
+  // Bumped by the chat's turn-complete event so a deal filed MID-CHAT shows
+  // up in Projects immediately, not on the next full page load.
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    if (!isHome) return;
+    const onActivity = () => setTick((t) => t + 1);
+    window.addEventListener("xor:activity", onActivity);
+    return () => window.removeEventListener("xor:activity", onActivity);
+  }, [isHome]);
 
   useEffect(() => {
     if (!isHome || !onExpired) return;
@@ -109,7 +119,7 @@ export default function Sidebar(props: Props) {
     return () => {
       alive = false;
     };
-  }, [isHome, onExpired]);
+  }, [isHome, onExpired, tick]);
 
   // ── view model ──────────────────────────────────────────────────────────
   let list: ReactNode;

@@ -40,6 +40,7 @@ export async function GET(req: NextRequest) {
       | { error: string };
     write_probe?: "ok" | { error: string };
     retries?: { pending: number; last_error?: string } | { error: string };
+    brain?: { chars: number; age_minutes: number } | "empty" | { error: string };
   } = {
     ok: true,
     mock_llm: cfg.mockLlm,
@@ -100,6 +101,23 @@ export async function GET(req: NextRequest) {
       } catch (e) {
         body.write_probe = { error: errText(e) };
       }
+    }
+    // Is the Drive knowledge actually loaded? "empty" = never crawled (or
+    // every crawl failed) — the bot then runs on the model alone.
+    try {
+      const { getDb } = await import("@/lib/supabase");
+      const raw = await getDb().getSetting("google:brain:v2");
+      if (!raw) {
+        body.brain = "empty";
+      } else {
+        const parsed = JSON.parse(raw) as { text?: string; fetched_at?: string };
+        body.brain = {
+          chars: (parsed.text ?? "").length,
+          age_minutes: Math.round((Date.now() - Date.parse(parsed.fetched_at ?? "")) / 60000),
+        };
+      }
+    } catch (e) {
+      body.brain = { error: errText(e) };
     }
     try {
       const { getDb } = await import("@/lib/supabase");
