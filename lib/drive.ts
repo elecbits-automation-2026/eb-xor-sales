@@ -318,6 +318,27 @@ export async function uploadOrUpdateDoc(
 /** Drive's native document type — targets for server-side conversion. */
 export const GOOGLE_DOC_MIME = "application/vnd.google-apps.document";
 
+/**
+ * Mirror an app-side deletion into Drive: the deal folder is renamed with a
+ * " (deleted)" suffix — never removed, the files stay recoverable — so the
+ * Drive tree and the app's project list can't silently disagree.
+ */
+export async function markFolderDeleted(folderId: string): Promise<void> {
+  const d = drive();
+  const meta = await d.files.get({
+    fileId: folderId,
+    fields: "name",
+    supportsAllDrives: true,
+  });
+  const name = meta.data.name ?? "";
+  if (/\(deleted\)\s*$/i.test(name)) return; // already marked
+  await d.files.update({
+    fileId: folderId,
+    requestBody: { name: `${name} (deleted)` },
+    supportsAllDrives: true,
+  });
+}
+
 export async function uploadStagedFile(
   folderId: string,
   name: string,

@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getUserFromRequest } from "@/lib/auth-server";
-import { TRACK_LABELS } from "@/lib/config";
+import { cfg, TRACK_LABELS } from "@/lib/config";
 import { getDb } from "@/lib/supabase";
 
 export async function GET(req: NextRequest) {
@@ -94,7 +94,27 @@ export async function DELETE(req: NextRequest) {
   if (!lead) {
     return NextResponse.json({ detail: "enquiry not found" }, { status: 404 });
   }
+  // Resolve the deal's Drive folder BEFORE the rows vanish, so the deletion
+  // can be mirrored into Drive (rename to "… (deleted)" — never removed).
+  let folderId: string | null = lead.drive_folder_id ?? null;
+  if (!folderId && lead.session_id) {
+    const sess = await db.getSession(lead.session_id);
+    if (
+      sess?.data.drive?.folder_id &&
+      (!lead.deal_id || sess.data.deal_id === lead.deal_id)
+    ) {
+      folderId = sess.data.drive.folder_id;
+    }
+  }
   await db.deleteEnquiry(lead.id, lead.session_id ?? null);
   console.info(`xor enquiry deleted lead=${lead.lead_ref} by=${user.id}`);
+  if (folderId && !cfg.mockDrive) {
+    try {
+      const { markFolderDeleted } = await import("@/lib/drive");
+      await markFolderDeleted(folderId);
+    } catch (err) {
+      console.error(`drive (deleted) rename failed lead=${lead.lead_ref}`, err);
+    }
+  }
   return NextResponse.json({ ok: true });
 }
