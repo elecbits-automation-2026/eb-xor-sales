@@ -164,6 +164,8 @@ export interface Db {
   insertLeadFile(file: LeadFileRow): Promise<void>;
   leadFiles(sessionId: string): Promise<LeadFileRow[]>;
   linkLeadFiles(sessionId: string, leadId: string): Promise<void>;
+  /** Record that a staged upload has already been delivered into Drive. */
+  markLeadFileDelivered(sessionId: string, storagePath: string, driveFileId: string): Promise<void>;
 
   insertHandoffRetry(
     leadId: string,
@@ -397,6 +399,20 @@ class SupabaseDb implements Db {
         .update({ lead_id: leadId })
         .eq("session_id", sessionId)
         .is("lead_id", null),
+    );
+  }
+
+  async markLeadFileDelivered(
+    sessionId: string,
+    storagePath: string,
+    driveFileId: string,
+  ): Promise<void> {
+    SupabaseDb.check(
+      await this.client
+        .from("lead_files")
+        .update({ drive_file_id: driveFileId })
+        .eq("session_id", sessionId)
+        .eq("storage_path", storagePath),
     );
   }
 
@@ -778,6 +794,17 @@ class MemoryDb implements Db {
   async linkLeadFiles(sessionId: string, leadId: string): Promise<void> {
     for (const f of this.s.leadFiles) {
       if (f.session_id === sessionId && f.lead_id === null) f.lead_id = leadId;
+    }
+  }
+
+  async markLeadFileDelivered(
+    sessionId: string,
+    storagePath: string,
+    driveFileId: string,
+  ): Promise<void> {
+    for (const f of this.s.leadFiles) {
+      if (f.session_id === sessionId && f.storage_path === storagePath)
+        f.drive_file_id = driveFileId;
     }
   }
 

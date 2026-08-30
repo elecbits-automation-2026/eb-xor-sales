@@ -46,6 +46,12 @@ export interface Register {
   issueDeal(clientId: string, dealName: string): Promise<string>;
   /** Fills the Deals-tab Drive Folder Link column for an issued deal. */
   setDealFolderLink(dealId: string, url: string): Promise<void>;
+  /**
+   * Replaces the Deals-tab Deal Name for an issued deal — used at finalize
+   * to upgrade the provisional name (deals are now issued EARLY, before the
+   * requirement details exist) to the real one-line summary.
+   */
+  setDealName(dealId: string, name: string): Promise<void>;
 }
 
 /** Two-digit issue year, IST — matches the register's Current Year cell. */
@@ -177,12 +183,21 @@ class SheetsRegister implements Register {
   }
 
   async setDealFolderLink(dealId: string, url: string): Promise<void> {
+    await this.update(`Deals!L${(await this.dealRow(dealId)) + DATA_START_ROW}`, [url]);
+  }
+
+  async setDealName(dealId: string, name: string): Promise<void> {
+    await this.update(`Deals!C${(await this.dealRow(dealId)) + DATA_START_ROW}`, [name]);
+  }
+
+  /** 0-based data-row index of a deal on the Deals tab (throws if absent). */
+  private async dealRow(dealId: string): Promise<number> {
     const ids = (await this.values(`Deals!A${DATA_START_ROW}:A`)).map((r) => r[0] ?? "");
     const idx = ids.indexOf(dealId);
     if (idx === -1) {
       throw new Error(`register: deal ${dealId} not found on the Deals tab`);
     }
-    await this.update(`Deals!L${idx + DATA_START_ROW}`, [url]);
+    return idx;
   }
 }
 
@@ -200,6 +215,10 @@ class OfflineRegister implements Register {
   }
 
   async setDealFolderLink(): Promise<void> {
+    // no register to write back to
+  }
+
+  async setDealName(): Promise<void> {
     // no register to write back to
   }
 }

@@ -379,7 +379,70 @@ async function clientOrgsize(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
   return resume(s);
 }
 
+/**
+ * Identity FIRST, questions after (ops directive): the moment the company
+ * questions are answered — or a returning client is recognised — the client
+ * ID is issued (register-first, Law 6), the deal ID registered with a
+ * provisional name, and the EB-C/EB-D folder pair created, so uploads later
+ * in the chat land straight in the deal folder. Every step is best-effort:
+ * any failure logs + shows in the tasks panel, the chat continues, and
+ * finalize re-runs whatever is missing (all steps are idempotent).
+ */
+async function establishAccount(s: SessionRow): Promise<string> {
+  const d = s.data;
+  try {
+    const client = await resolveClient(s);
+    if (!d.deal_id) {
+      const { register } = await import("./register");
+      const provisional = `${TRACK_LABELS[s.track ?? "UNKNOWN"] ?? "Enquiry"} — ${
+        d.contact.company ?? ""
+      }`.slice(0, 80);
+      d.deal_id = await trackTask(
+        s.id,
+        "Register deal",
+        () => register().issueDeal(client.client_code, provisional),
+        { detail: (id) => id },
+      );
+    }
+    if (cfg.mockDrive) {
+      await noteTask(s.id, "Create Drive workspace", "completed", "demo mode — logged, not sent");
+    } else if (!d.drive) {
+      const res = await trackTask(
+        s.id,
+        "Create Drive workspace",
+        async () => {
+          const { provisionDealFolders } = await import("./drive");
+          return provisionDealFolders({
+            client_code: client.client_code,
+            deal_id: d.deal_id!,
+            client_folder_id: client.drive_folder_id,
+          });
+        },
+        { detail: () => d.deal_id ?? null, failDetail: "will be created with the handoff" },
+      );
+      d.drive = { folder_id: res.folder_id, folder_url: res.folder_url };
+      if (res.client_folder_id !== client.drive_folder_id) {
+        await getDb().updateClient(client.id, {
+          drive_folder_id: res.client_folder_id,
+          drive_folder_url: res.client_folder_url,
+        });
+      }
+      try {
+        const { register } = await import("./register");
+        await register().setDealFolderLink(d.deal_id!, res.folder_url);
+      } catch (err) {
+        console.error(`register folder-link write failed deal=${d.deal_id}`, err);
+      }
+    }
+    return d.deal_id ? `Filed as ${d.deal_id}. ` : "";
+  } catch (err) {
+    console.error(`early account establish failed session=${s.id}`, err);
+    return ""; // finalize catches up — nothing here may block the visitor
+  }
+}
+
 async function startTrackFlow(s: SessionRow, first: string, prefix = ""): Promise<ChatOut> {
+  prefix += await establishAccount(s);
   if (s.track === "ODM") {
     s.state = "ODM_SLOTS";
     const [key, q, hint] = ODM_SLOTS[0];
@@ -700,6 +763,15 @@ async function finalizeWork(s: SessionRow): Promise<ChatOut> {
       () => register().issueDeal(client.client_code, summary.slice(0, 80)),
       { detail: (id) => id },
     );
+  } else {
+    // Deal issued EARLY with a provisional name — upgrade it to the real
+    // one-line requirement summary now that it exists.
+    try {
+      const { register } = await import("./register");
+      await register().setDealName(d.deal_id, summary.slice(0, 80));
+    } catch (err) {
+      console.error(`register deal-name update failed deal=${d.deal_id}`, err);
+    }
   }
   let leadId = d.lead_id;
   if (!leadId) {
@@ -724,17 +796,25 @@ async function finalizeWork(s: SessionRow): Promise<ChatOut> {
 
   const summaryMd = intakeSummary(s);
 
-  // Latest file per checklist item, in checklist order. Every artifact
-  // written into the deal folder carries ONE capture timestamp (IST,
-  // filename-safe) — stored in the payload so retries reuse the same names.
+  // Latest file per checklist item, in checklist order — EXCLUDING files the
+  // upload step already delivered into the deal folder (drive_file_id set).
+  // Artifacts written now carry ONE capture timestamp (IST, filename-safe),
+  // stored in the payload so retries reuse the same names.
   const stamp = istTimestamp().replace(":", "");
   const allFiles = await db.leadFiles(s.id);
-  const latest = new Map<string, { storage_path: string; filename: string }>();
-  for (const f of allFiles) latest.set(f.item_key, { storage_path: f.storage_path, filename: f.filename });
-  const files = [...latest.entries()].map(([item_key, f]) => ({
-    storage_path: f.storage_path,
-    filename: `${stamp} ${item_key}--${f.filename}`,
-  }));
+  const latest = new Map<string, { storage_path: string; filename: string; delivered: boolean }>();
+  for (const f of allFiles)
+    latest.set(f.item_key, {
+      storage_path: f.storage_path,
+      filename: f.filename,
+      delivered: Boolean(f.drive_file_id),
+    });
+  const files = [...latest.entries()]
+    .filter(([, f]) => !f.delivered)
+    .map(([item_key, f]) => ({
+      storage_path: f.storage_path,
+      filename: `${stamp} ${item_key}--${f.filename}`,
+    }));
 
   const drivePayload = {
     lead_ref: d.lead_ref,
@@ -753,8 +833,8 @@ async function finalizeWork(s: SessionRow): Promise<ChatOut> {
 
   let handoffTrouble = false;
   if (cfg.mockDrive) {
+    // (the demo-mode "Create Drive workspace" task was noted at establish)
     await db.insertHandoffRetry(leadId, "drive", drivePayload, "MOCK_DRIVE — logged, not sent", true);
-    await noteTask(s.id, "Create Drive workspace", "completed", "demo mode — logged, not sent");
   } else {
     try {
       const res = await trackTask(
