@@ -43,12 +43,18 @@ export const cfg = {
     return num("MAX_UPLOAD_MB", 50);
   },
 
-  // Supabase (server-only; the browser never sees these)
+  // Supabase. Plain names, no NEXT_PUBLIC_ build-time vars: the browser
+  // fetches the two PUBLIC values (url + anon key) from /api/config at
+  // runtime. Legacy NEXT_PUBLIC_* names are still honored as fallbacks.
   get supabaseUrl() {
-    return process.env.SUPABASE_URL || "";
+    return process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
   },
   get supabaseServiceRoleKey() {
     return process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+  },
+  /** The PUBLIC anon key (safe to serve to browsers; RLS is deny-all). */
+  get supabaseAnonKey() {
+    return process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
   },
 
   // Google (base64-encoded service-account JSON — never a file in the repo)

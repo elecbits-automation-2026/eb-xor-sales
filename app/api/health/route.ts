@@ -23,8 +23,18 @@ export async function GET() {
     ok: boolean;
     mock_llm: boolean;
     mock_drive: boolean;
+    db: "supabase" | "memory";
+    auth: "supabase" | "demo";
     google?: { register: BindingReport; accounts_folder: BindingReport; funnel: BindingReport };
-  } = { ok: true, mock_llm: cfg.mockLlm, mock_drive: cfg.mockDrive };
+  } = {
+    ok: true,
+    mock_llm: cfg.mockLlm,
+    mock_drive: cfg.mockDrive,
+    // Which drivers this deploy actually resolved — a typo'd env var shows
+    // up here as "memory"/"demo" instead of failing silently.
+    db: cfg.supabaseUrl && cfg.supabaseServiceRoleKey ? "supabase" : "memory",
+    auth: cfg.supabaseUrl && cfg.supabaseAnonKey ? "supabase" : "demo",
+  };
 
   if (!cfg.mockDrive && cfg.googleServiceAccountB64) {
     const { resolveRegister, resolveAccountsFolder, resolveFunnel } = await import("@/lib/gtargets");
