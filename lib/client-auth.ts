@@ -175,7 +175,14 @@ export async function signUp(i: {
     const { data, error } = await (await sb()).auth.signUp({
       email: i.email,
       password: i.password,
-      options: { data: { name: i.name, company: i.company ?? "" } },
+      options: {
+        data: { name: i.name, company: i.company ?? "" },
+        // The Supabase project is shared with the PMS app, whose domain is
+        // the project-wide Site URL — so the confirm-email link must carry
+        // OUR return address or the client lands on the wrong product.
+        emailRedirectTo:
+          typeof window !== "undefined" ? `${window.location.origin}/account` : undefined,
+      },
     });
     if (error) throw new Error(friendly(error.message));
     // No session back ⇒ Supabase wants the email confirmed first.
