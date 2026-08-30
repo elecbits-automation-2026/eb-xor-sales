@@ -72,6 +72,7 @@ const STATE_LABELS: Record<SessionState, string> = {
   CLIENT_ORGSIZE: "about your company",
   ODM_SLOTS: "requirement capture",
   ODM_REVIEW: "review",
+  ODM_BENCH_REVIEW: "defining your product",
   ODM_LLD_REVIEW: "refining your LLD",
   EMS_CHECKLIST: "build package",
   EMS_DETAILS: "build details",
@@ -244,7 +245,7 @@ export default function Chat() {
     freezeAll();
     setDraft("");
     if (inputRef.current) inputRef.current.style.height = "46px";
-    void post({ kind: "text", text: t });
+    void post({ kind: "text", text: t, channel: "text" });
   }, [draft, addMsg, freezeAll, post]);
 
   const onChip = useCallback(
@@ -432,7 +433,7 @@ export default function Chat() {
       if (busyRef.current) return;
       addMsg(text, "user");
       freezeAll();
-      void post({ kind: "text", text });
+      void post({ kind: "text", text, channel: "voice" });
     },
     [addMsg, freezeAll, post],
   );
@@ -497,7 +498,9 @@ export default function Chat() {
           return;
         }
         synth.cancel();
-        const u = new SpeechSynthesisUtterance(text);
+        // Bullets and markdown read terribly aloud — speak plain prose.
+        const spoken = text.replace(/^[\s]*[-•*]\s+/gm, "").replace(/[*_#`]/g, "");
+        const u = new SpeechSynthesisUtterance(spoken);
         const voices = synth.getVoices();
         u.voice =
           voices.find((v) => v.lang === "en-IN") ??

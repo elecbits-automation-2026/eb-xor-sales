@@ -13,10 +13,11 @@ import { brainContext } from "@/lib/brain";
 import { cfg } from "@/lib/config";
 import { ODM_SLOT_LABELS } from "@/lib/flows";
 import { retrieveContext } from "@/lib/knowledge";
-import { templateLld } from "@/lib/lld";
+import { templateBenchmark, templateLld } from "@/lib/lld";
 import {
   TOOL_SLOTS,
   TOOL_TRIAGE,
+  buildBenchmarkSystem,
   buildLldSystem,
   buildQaStable,
   buildSlotsSystem,
@@ -135,12 +136,20 @@ function history(msgs: Msg[], userText: string, limit = 12): Anthropic.MessagePa
   return out;
 }
 
+/** Web-search responses carry <cite index="…">…</cite> markup — strip it
+ *  everywhere customer-facing; the words stay, the tags go. */
+function stripCites(s: string): string {
+  return s.replace(/<\/?cite[^>]*>/g, "");
+}
+
 function joinText(content: Anthropic.ContentBlock[]): string {
-  return content
-    .filter((b): b is Anthropic.TextBlock => b.type === "text")
-    .map((b) => b.text)
-    .join("")
-    .trim();
+  return stripCites(
+    content
+      .filter((b): b is Anthropic.TextBlock => b.type === "text")
+      .map((b) => b.text)
+      .join("")
+      .trim(),
+  );
 }
 
 const TRIAGE_TRACKS: TriageTrack[] = ["ODM", "EMS", "PRODUCT", "QUESTION", "UNCLEAR"];
@@ -193,6 +202,7 @@ export async function extractSlots(
   userText: string,
   remainingSlots: { key: string; label: string }[] = [],
   recent: Msg[] = [],
+  channel: "voice" | "text" = "text",
 ): Promise<{ updates: Record<string, string>; ack: string; nextQuestion?: string }> {
   if (cfg.mockLlm) {
     const updates: Record<string, string> = expectedSlot
@@ -214,6 +224,7 @@ export async function extractSlots(
     `Remaining slots, in order (next_question targets the first one your ` +
     `updates leave unfilled): ${JSON.stringify(remainingSlots)}\n\n` +
     (convo ? `Recent conversation:\n${convo}\n\n` : "") +
+    `Input channel: ${channel}\n` +
     `Customer message: ${userText}`;
   try {
     const brain = await brainContext(); // never throws — cached text or ""
@@ -235,8 +246,9 @@ export async function extractSlots(
     // NO force-fill: when the model judged the message unusable for the
     // asked slot, the orchestrator re-asks (bounded by maxProbeTurns) —
     // "paneer pakoda" must never become the product concept.
-    const ack = typeof out.ack === "string" && out.ack ? out.ack : "Noted.";
-    const nq = typeof out.next_question === "string" ? out.next_question.trim() : "";
+    const ack = typeof out.ack === "string" && out.ack ? stripCites(out.ack) : "Noted.";
+    const nq =
+      typeof out.next_question === "string" ? stripCites(out.next_question).trim() : "";
     return { updates, ack, nextQuestion: nq && nq.length <= 300 ? nq : undefined };
   } catch (err) {
     console.error("slot extraction failed; using raw text:", err);
@@ -331,6 +343,58 @@ export async function generateLld(
   } catch (err) {
     console.error("LLD generation failed; using template:", err);
     return templateLld(slots, contact, leadRef);
+  }
+}
+
+// ──────────── Product Definition & Benchmark Report (Outcome A) ───────────
+export async function generateBenchmark(
+  slots: Record<string, string>,
+  contact: Record<string, string>,
+  leadRef: string,
+  recent: Msg[] = [],
+  revision?: { prior: string; feedback: string },
+): Promise<string> {
+  if (cfg.mockLlm) return templateBenchmark(slots, contact, leadRef);
+  const brief = Object.entries(slots)
+    .map(([k, v]) => `- ${ODM_SLOT_LABELS[k] ?? k}: ${v}`)
+    .join("\n");
+  // The transcript is the Stage-A goldmine: reference links, wishlist,
+  // differentiation and price intent usually live there, not in the slots.
+  const convo = recent
+    .slice(-40)
+    .map((m) => `${m.role === "user" ? "Customer" : "XoR"}: ${m.content.slice(0, 400)}`)
+    .join("\n");
+  try {
+    const brain = await brainContext(); // never throws — cached text or ""
+    const query = [slots.product_concept, slots.key_features].filter(Boolean).join(" — ");
+    const chunks = query ? await retrieveContext(query) : [];
+    const resp = await createResuming(
+      {
+        model: cfg.model,
+        max_tokens: 4000,
+        system: systemBlocks(buildBenchmarkSystem(brain), kbBackground(chunks.slice(0, 4))),
+        tools: [webSearchTool(8)], // the bench: re-verify listings, fill gaps
+      },
+      [
+        {
+          role: "user",
+          content:
+            `Intake ref ${leadRef} for ${contact["company"] ?? "the customer"}.\n` +
+            `Intake answers:\n${brief}\n\n` +
+            (convo ? `Conversation transcript:\n${convo}\n\n` : "") +
+            (revision
+              ? `Previous report:\n${revision.prior.slice(0, 12000)}\n\n` +
+                `The customer reviewed it and asks:\n${revision.feedback}\n\n` +
+                `Rewrite the COMPLETE report applying the requested changes.`
+              : `Write the Product Definition & Benchmark Report.`),
+        },
+      ],
+    );
+    const text = joinText(resp.content);
+    return text || templateBenchmark(slots, contact, leadRef);
+  } catch (err) {
+    console.error("benchmark generation failed; using template:", err);
+    return templateBenchmark(slots, contact, leadRef);
   }
 }
 

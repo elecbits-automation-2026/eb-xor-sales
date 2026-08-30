@@ -176,11 +176,11 @@ describe("ODM flow", () => {
       { params: Promise.resolve({ session: sessionPart, file: filePart }) },
     );
     expect(dl.status).toBe(200);
-    // The deliverable is the branded .docx (a ZIP: leading "PK") with the
-    // Word content type; markdown only serves as the docx-failure fallback.
-    expect(dl.headers.get("content-type")).toContain("wordprocessingml");
+    // The deliverable is the branded PDF; markdown only serves as the
+    // pdf-failure fallback.
+    expect(dl.headers.get("content-type")).toBe("application/pdf");
     const body = Buffer.from(await dl.arrayBuffer());
-    expect(body.subarray(0, 2).toString("latin1")).toBe("PK");
+    expect(body.subarray(0, 5).toString("latin1")).toBe("%PDF-");
     expect(body.length).toBeGreaterThan(5000);
 
     // leads row exists with a well-formed ref

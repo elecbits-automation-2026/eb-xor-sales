@@ -179,6 +179,8 @@ export async function handle(inp: ChatIn, authUser?: AuthUser | null): Promise<C
         return await odmSlots(s, inp, history);
       case "ODM_REVIEW":
         return await odmReview(s, inp);
+      case "ODM_BENCH_REVIEW":
+        return await odmBenchReview(s, inp);
       case "ODM_LLD_REVIEW":
         return await odmLldReview(s, inp);
       case "EMS_CHECKLIST":
@@ -262,6 +264,7 @@ async function goBack(s: SessionRow): Promise<ChatOut> {
     case "EMS_DETAILS":
       s.state = "EMS_CHECKLIST";
       break;
+    case "ODM_BENCH_REVIEW":
     case "ODM_LLD_REVIEW":
       s.state = "ODM_REVIEW";
       break;
@@ -704,6 +707,7 @@ async function odmSlots(s: SessionRow, inp: ChatIn, history: Msg[] = []): Promis
     inp.text,
     remaining,
     history,
+    inp.channel ?? "text",
   );
   Object.assign(s.data.slots, ext.updates ?? {});
 
@@ -756,11 +760,17 @@ async function odmSlots(s: SessionRow, inp: ChatIn, history: Msg[] = []): Promis
 
 function reviewChips() {
   return [
+    { id: "bench:generate", label: "Benchmark & define the product" },
     { id: "lld:generate", label: "Generate my LLD draft" },
     { id: "lld:edit", label: "Change an answer" },
     { id: "lld:skip", label: "Skip — submit as is" },
   ];
 }
+
+const BENCH_REVIEW_CHIPS = [
+  { id: "bench:accept", label: "Locked — continue to the LLD" },
+  { id: "bench:file", label: "File as is (definition only)" },
+];
 
 const LLD_REVIEW_CHIPS = [
   { id: "lld:accept", label: "Looks right — file it" },
@@ -768,40 +778,97 @@ const LLD_REVIEW_CHIPS = [
 ];
 
 /**
- * Store the LLD twice: markdown (grounds later revisions) and a branded
- * Elecbits .docx — the customer-facing deliverable. Docx generation is
- * best-effort: on any failure the markdown serves, never a broken flow.
+ * Store a generated document twice: markdown (grounds later revisions) and
+ * the branded Elecbits PDF — the customer-facing deliverable. PDF
+ * generation is best-effort: on any failure the markdown serves, never a
+ * broken flow.
  */
-async function storeLld(s: SessionRow, lldMd: string): Promise<string> {
+async function storeDoc(s: SessionRow, kind: "lld" | "bench", md: string): Promise<string> {
   const db = getDb();
   const lead = s.data.lead_ref ?? "XOR";
-  const mdName = `LLD-draft-${lead}.md`;
+  const base = kind === "lld" ? `LLD-draft-${lead}` : `Product-Definition-${lead}`;
+  const docLabel =
+    kind === "lld" ? "LLD Draft v0.1" : "Product Definition & Benchmark Report v0.1";
+  const mdName = `${base}.md`;
   const mdPath = `${s.id}/generated/${mdName}`;
-  await db.putObject(mdPath, new TextEncoder().encode(lldMd), "text/markdown");
-  s.data.lld_md_path = mdPath;
+  await db.putObject(mdPath, new TextEncoder().encode(md), "text/markdown");
+  const set = (file: string, path: string) => {
+    if (kind === "lld") {
+      s.data.lld_file = file;
+      s.data.lld_path = path;
+      s.data.lld_md_path = mdPath;
+    } else {
+      s.data.bench_file = file;
+      s.data.bench_path = path;
+      s.data.bench_md_path = mdPath;
+    }
+  };
   try {
-    const { lldDocx } = await import("./lld-docx");
-    const buf = await lldDocx(lldMd, {
+    const { brandedPdf } = await import("./lld-pdf");
+    const buf = await brandedPdf(md, {
+      docLabel,
       leadRef: lead,
       dealId: s.data.deal_id,
       company: s.data.contact.company ?? null,
     });
-    const docxName = `LLD-draft-${lead}.docx`;
-    const docxPath = `${s.id}/generated/${docxName}`;
-    await db.putObject(
-      docxPath,
-      new Uint8Array(buf),
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    );
-    s.data.lld_file = docxName;
-    s.data.lld_path = docxPath;
-    return docxName;
+    const pdfName = `${base}.pdf`;
+    const pdfPath = `${s.id}/generated/${pdfName}`;
+    await db.putObject(pdfPath, new Uint8Array(buf), "application/pdf");
+    set(pdfName, pdfPath);
+    return pdfName;
   } catch (err) {
-    console.error("lld docx generation failed — serving markdown instead", err);
-    s.data.lld_file = mdName;
-    s.data.lld_path = mdPath;
+    console.error(`${kind} pdf generation failed — serving markdown instead`, err);
+    set(mdName, mdPath);
     return mdName;
   }
+}
+
+/** Iterative benchmark-report editing (Outcome A): revise, then LLD or file. */
+async function odmBenchReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
+  const db = getDb();
+  if (inp.kind === "chip" && inp.chip_id === "bench:accept") {
+    s.state = "ODM_REVIEW";
+    return out(
+      s,
+      [
+        "Definition locked — its Target Specifications now anchor the " +
+          "engineering spec. Ready for the LLD draft?",
+      ],
+      [chips(reviewChips().filter((c) => c.id !== "bench:generate"))],
+    );
+  }
+  if (inp.kind === "chip" && inp.chip_id === "bench:file") return finalize(s);
+  const feedback =
+    inp.kind === "text" && inp.text
+      ? inp.text
+      : inp.kind === "chip" && inp.chip_id === "bench:regen"
+        ? "Regenerate the report with substantially more depth."
+        : null;
+  if (feedback) {
+    const mdPath = s.data.bench_md_path ?? s.data.bench_path;
+    const prior = mdPath ? await db.getObject(mdPath) : null;
+    const priorMd = prior ? new TextDecoder().decode(prior) : "";
+    const transcript = await db.recentMessages(s.id, 60);
+    const benchMd = await llm.generateBenchmark(
+      s.data.slots,
+      s.data.contact,
+      s.data.lead_ref ?? "XOR",
+      transcript,
+      { prior: priorMd, feedback },
+    );
+    const fname = await storeDoc(s, "bench", benchMd);
+    return out(
+      s,
+      ["Rewritten with your changes. Another pass, or lock it and move to the LLD?"],
+      [
+        card("Product Definition & Benchmark Report (revised)", fname, [
+          { label: "Open the revised report", url: `/api/download/${s.id}/${encodeURIComponent(fname)}` },
+        ]),
+        chips(BENCH_REVIEW_CHIPS),
+      ],
+    );
+  }
+  return resume(s);
 }
 
 /** Iterative LLD editing: revise on feedback, file on approval. */
@@ -826,7 +893,7 @@ async function odmLldReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
       transcript,
       { prior: priorMd, feedback },
     );
-    const fname = await storeLld(s, lldMd);
+    const fname = await storeDoc(s, "lld", lldMd);
     return out(
       s,
       ["Rewritten with your changes. Take another look — more edits, or shall I file it?"],
@@ -844,6 +911,38 @@ async function odmLldReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
 async function odmReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
   const db = getDb();
   if (inp.kind === "chip") {
+    if (inp.chip_id === "bench:generate") {
+      // Outcome A: the market bench + product definition, per the
+      // benchmark playbook — its §6 table then anchors the LLD.
+      if (!s.data.lead_ref) s.data.lead_ref = await db.nextLeadRef();
+      const transcript = await db.recentMessages(s.id, 60);
+      const benchMd = await llm.generateBenchmark(
+        s.data.slots,
+        s.data.contact,
+        s.data.lead_ref,
+        transcript,
+      );
+      const fname = await storeDoc(s, "bench", benchMd);
+      s.state = "ODM_BENCH_REVIEW";
+      return out(
+        s,
+        [
+          "Here's your Product Definition & Benchmark Report — the bench, " +
+            "the price ladder, the MoSCoW feature set and every decision " +
+            "logged. Read it and tell me what to change; when it's locked " +
+            "we go component-level with the LLD.",
+        ],
+        [
+          card("Product Definition & Benchmark Report", fname, [
+            {
+              label: "Open the report",
+              url: `/api/download/${s.id}/${encodeURIComponent(fname)}`,
+            },
+          ]),
+          chips(BENCH_REVIEW_CHIPS),
+        ],
+      );
+    }
     if (inp.chip_id === "lld:generate") {
       if (!s.data.lead_ref) s.data.lead_ref = await db.nextLeadRef();
       const transcript = await db.recentMessages(s.id, 40);
@@ -853,7 +952,7 @@ async function odmReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
         s.data.lead_ref,
         transcript,
       );
-      const fname = await storeLld(s, lldMd);
+      const fname = await storeDoc(s, "lld", lldMd);
       // The draft is EDITABLE — iterate with the customer until it reads
       // right, exactly like working a doc in Claude; only then file it.
       s.state = "ODM_LLD_REVIEW";
@@ -1166,6 +1265,10 @@ async function finalizeWork(s: SessionRow): Promise<ChatOut> {
       storage_path: f.storage_path,
       filename: `${stamp} ${item_key}--${f.filename}`,
     }));
+  // Outcome A's report travels to the deal folder alongside everything else.
+  if (d.bench_path && d.bench_file) {
+    files.push({ storage_path: d.bench_path, filename: `${stamp} ${d.bench_file}` });
+  }
 
   const drivePayload = {
     lead_ref: d.lead_ref,
@@ -1251,6 +1354,12 @@ async function finalizeWork(s: SessionRow): Promise<ChatOut> {
   // The visitor gets only the LLD download link — the Drive folder is
   // internal to the team.
   const links: { label: string; url: string }[] = [];
+  if (d.bench_file) {
+    links.push({
+      label: "Download your Product Definition & Benchmark Report",
+      url: `/api/download/${s.id}/${encodeURIComponent(d.bench_file)}`,
+    });
+  }
   if (d.lld_file) {
     links.push({
       label: "Download your LLD draft",
@@ -1414,6 +1523,8 @@ function resumeWidget(s: SessionRow): Widget | null {
       return form("product_details", "What you need", PRODUCT_DETAILS_FORM, "Submit enquiry");
     case "ODM_REVIEW":
       return chips(reviewChips());
+    case "ODM_BENCH_REVIEW":
+      return chips(BENCH_REVIEW_CHIPS);
     case "ODM_LLD_REVIEW":
       return chips(LLD_REVIEW_CHIPS);
     case "DONE":
@@ -1432,6 +1543,8 @@ async function resume(s: SessionRow): Promise<ChatOut> {
     CLIENT_ORGSIZE: "And the organisation size?",
     ODM_SLOTS: resumeOdmQuestion(s),
     ODM_REVIEW: "Ready to generate the LLD draft, or change an answer?",
+    ODM_BENCH_REVIEW:
+      "Your Product Definition & Benchmark Report is ready — tell me what to change, or lock it.",
     ODM_LLD_REVIEW: "Your LLD draft is ready — tell me what to change, or file it as is.",
     EMS_CHECKLIST: "Whenever you're ready with the next file.",
     EMS_DETAILS: "Just the build details left.",
