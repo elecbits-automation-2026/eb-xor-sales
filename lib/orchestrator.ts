@@ -512,19 +512,41 @@ async function clientOrgsize(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
  */
 async function establishAccount(s: SessionRow): Promise<string> {
   const d = s.data;
+  const provisional = `${TRACK_LABELS[s.track ?? "UNKNOWN"] ?? "Enquiry"} — ${
+    d.contact.company ?? ""
+  }`.slice(0, 80);
   try {
     const client = await resolveClient(s);
     if (!d.deal_id) {
       const { register } = await import("./register");
-      const provisional = `${TRACK_LABELS[s.track ?? "UNKNOWN"] ?? "Enquiry"} — ${
-        d.contact.company ?? ""
-      }`.slice(0, 80);
       d.deal_id = await trackTask(
         s.id,
         "Register deal",
         () => register().issueDeal(client.client_code, provisional),
         { detail: (id) => id },
       );
+    }
+    // The enquiry appears under "Your projects" (with its date) the moment
+    // the deal exists — not only after finalize, which upgrades the
+    // provisional summary to the real one-liner and attaches the files.
+    if (!d.lead_id) {
+      const db = getDb();
+      if (!d.lead_ref) d.lead_ref = await db.nextLeadRef();
+      const lead = await db.insertLead({
+        lead_ref: d.lead_ref,
+        session_id: s.id,
+        track: s.track ?? "UNKNOWN",
+        company: d.contact.company ?? "",
+        contact_name: d.contact.name ?? "",
+        email: d.contact.email ?? "",
+        phone: d.contact.phone ?? "",
+        summary: provisional,
+        quantity: "",
+        timeline: "",
+        client_id: client.id,
+        deal_id: d.deal_id ?? null,
+      });
+      d.lead_id = lead.id;
     }
     if (cfg.mockDrive) {
       await noteTask(s.id, "Create Drive workspace", "completed", "demo mode — logged, not sent");
@@ -559,7 +581,10 @@ async function establishAccount(s: SessionRow): Promise<string> {
     return d.deal_id ? `Filed as ${d.deal_id}. ` : "";
   } catch (err) {
     console.error(`early account establish failed session=${s.id}`, err);
-    return ""; // finalize catches up — nothing here may block the visitor
+    // Nothing here may block the visitor — but the failure must be VISIBLE
+    // in the tasks panel, never silent; finalize re-runs whatever is missing.
+    await noteTask(s.id, "Account setup", "failed", "recovering automatically at handoff");
+    return "";
   }
 }
 
@@ -938,6 +963,11 @@ async function finalizeWork(s: SessionRow): Promise<ChatOut> {
     });
     leadId = lead.id;
     d.lead_id = leadId;
+    await db.linkLeadFiles(s.id, leadId);
+  } else {
+    // Lead row created early (at establish) with a provisional summary —
+    // upgrade it to the captured requirement and attach staged files.
+    await db.updateLead(leadId, { summary, quantity, timeline });
     await db.linkLeadFiles(s.id, leadId);
   }
 

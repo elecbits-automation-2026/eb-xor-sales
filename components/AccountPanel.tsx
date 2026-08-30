@@ -228,7 +228,7 @@ function Transcript({ dealRef }: { dealRef: string }) {
         </svg>
         View the conversation
         <span className="pv-convo-n">
-          {msgs.length} message{msgs.length === 1 ? "" : "s"}
+          · {msgs.length} message{msgs.length === 1 ? "" : "s"}
         </span>
       </summary>
       <div className="pv-chat">

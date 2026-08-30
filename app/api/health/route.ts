@@ -8,7 +8,7 @@
  * an unexposed schema) comes back as an error STRING in the JSON, because a
  * blank error page is exactly the situation this endpoint exists to avoid.
  */
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 import { cfg } from "@/lib/config";
 
@@ -27,7 +27,7 @@ function report(
   return r.status === "fulfilled" ? r.value : { error: errText(r.reason) };
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const body: {
     ok: boolean;
     mock_llm: boolean;
@@ -38,6 +38,8 @@ export async function GET() {
     google?:
       | { register: BindingReport; accounts_folder: BindingReport; funnel: BindingReport }
       | { error: string };
+    write_probe?: "ok" | { error: string };
+    retries?: { pending: number; last_error?: string } | { error: string };
   } = {
     ok: true,
     mock_llm: cfg.mockLlm,
@@ -83,6 +85,35 @@ export async function GET() {
     }
   } catch (e) {
     body.google = { error: errText(e) };
+  }
+
+  // ?deep=1 — the expensive truths: an ACTUAL file-content write into the
+  // accounts tree (catches the service-account-in-My-Drive quota refusal
+  // that plain folder checks can't see) and the handoff retry queue with
+  // Google's verbatim last error.
+  if (new URL(req.url).searchParams.get("deep")) {
+    if (!cfg.mockDrive && cfg.googleServiceAccountB64) {
+      try {
+        const { driveWriteProbe } = await import("@/lib/drive");
+        const err = await driveWriteProbe();
+        body.write_probe = err ? { error: err } : "ok";
+      } catch (e) {
+        body.write_probe = { error: errText(e) };
+      }
+    }
+    try {
+      const { getDb } = await import("@/lib/supabase");
+      const rows = await getDb().unresolvedHandoffRetries();
+      const last = rows.length
+        ? rows.reduce((a, b) => (Date.parse(a.created_at) > Date.parse(b.created_at) ? a : b))
+        : null;
+      body.retries = {
+        pending: rows.length,
+        ...(last?.last_error ? { last_error: String(last.last_error).slice(0, 400) } : {}),
+      };
+    } catch (e) {
+      body.retries = { error: errText(e) };
+    }
   }
 
   return NextResponse.json(body);

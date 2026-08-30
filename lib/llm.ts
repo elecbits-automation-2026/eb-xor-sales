@@ -40,6 +40,17 @@ function getClient(): Anthropic {
   return client;
 }
 
+/**
+ * System prompt as an explicitly cacheable block. The brain makes every
+ * system prompt large (tens of KB) yet stable for an hour — with
+ * cache_control, repeat turns skip re-processing it, which is most of the
+ * latency (and cost) of each call and the difference between a chat turn
+ * finishing comfortably and a serverless timeout.
+ */
+function cacheableSystem(text: string): Anthropic.TextBlockParam[] {
+  return [{ type: "text", text, cache_control: { type: "ephemeral" } }];
+}
+
 /** One Claude call that must answer via the given tool; returns its input. */
 async function callTool(
   system: string,
@@ -49,7 +60,7 @@ async function callTool(
   const resp = await getClient().messages.create({
     model: cfg.model,
     max_tokens: 1024,
-    system,
+    system: cacheableSystem(system),
     messages,
     tools: [tool],
     tool_choice: { type: "tool", name: tool.name },
@@ -187,7 +198,7 @@ export async function answerQuestion(history_: Msg[], userText: string): Promise
     const resp = await getClient().messages.create({
       model: cfg.model,
       max_tokens: 400,
-      system: buildQaSystem(chunks, brain),
+      system: cacheableSystem(buildQaSystem(chunks, brain)),
       messages: history(history_, userText),
     });
     return joinText(resp.content);
@@ -215,7 +226,7 @@ export async function generateLld(
     const resp = await getClient().messages.create({
       model: cfg.model,
       max_tokens: 2048,
-      system: buildLldSystem(brain),
+      system: cacheableSystem(buildLldSystem(brain)),
       messages: [
         {
           role: "user",
