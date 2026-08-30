@@ -36,6 +36,12 @@ export async function trackTask<T>(
       await db
         .updateTask(task.id, { status: "completed", detail: opts?.detail?.(result) ?? null })
         .catch(() => undefined);
+    } else {
+      // The "running" insert failed — the step must STILL leave a record;
+      // a step that ran with no row is indistinguishable from one skipped.
+      await getDb()
+        .insertTask(sessionId, label, "completed", opts?.detail?.(result) ?? null)
+        .catch((err) => console.error(`task record failed (${label})`, err));
     }
     return result;
   } catch (err) {
@@ -45,6 +51,15 @@ export async function trackTask<T>(
           status: "failed",
           detail: opts?.failDetail ?? "temporary hiccup — the team is on it",
         })
+        .catch(() => undefined);
+    } else {
+      await getDb()
+        .insertTask(
+          sessionId,
+          label,
+          "failed",
+          opts?.failDetail ?? "temporary hiccup — the team is on it",
+        )
         .catch(() => undefined);
     }
     throw err;
