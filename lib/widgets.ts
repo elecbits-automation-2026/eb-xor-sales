@@ -32,6 +32,12 @@ export interface ChatOut {
   session_id: string;
   messages: string[];
   widgets: Widget[];
+  /**
+   * Stored transcript, sent ONLY on an "open" of an existing session so a
+   * reload re-renders the whole conversation instead of just the
+   * re-presented prompt. Precedes `messages` chronologically.
+   */
+  history?: Msg[];
   meta: {
     state: SessionState;
     track: Track | null;

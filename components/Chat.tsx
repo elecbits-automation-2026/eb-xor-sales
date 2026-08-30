@@ -126,6 +126,14 @@ export default function Chat() {
     } catch {
       // private mode — session just won't survive a reload
     }
+    // A resumed session arrives with its stored transcript — render it
+    // first (only into an empty pane, i.e. the mount-time open).
+    const hist: Entry[] = (res.history ?? []).map((m) => ({
+      id: ++idRef.current,
+      kind: "msg",
+      who: m.role === "user" ? "user" : "bot",
+      text: m.content,
+    }));
     const additions: Entry[] = [];
     for (const m of res.messages) {
       additions.push({ id: ++idRef.current, kind: "msg", who: "bot", text: m });
@@ -133,7 +141,9 @@ export default function Chat() {
     if (res.widgets.length) {
       additions.push({ id: ++idRef.current, kind: "widgets", widgets: res.widgets, frozen: false });
     }
-    if (additions.length) setEntries((es) => [...es, ...additions]);
+    if (hist.length || additions.length) {
+      setEntries((es) => (es.length === 0 ? [...hist, ...additions] : [...es, ...additions]));
+    }
     // Voice mode: the reply is read aloud; when it finishes, listening resumes.
     if (voiceRef.current && res.messages.length) {
       speakRef.current?.(res.messages.join(" "));

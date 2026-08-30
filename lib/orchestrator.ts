@@ -50,9 +50,9 @@ const TRACK_CHIPS = [
 ];
 
 const GREETING =
-  "Namaste, I'm XOR Assist. Tell me what you're building — or pick the " +
-  "closest fit below — and I'll route you to the right Elecbits team with " +
-  "everything they need to move fast.";
+  "Namaste — I'm XoR from Elecbits. Tell me what you're building, or pick " +
+  "the closest fit below, and I'll capture your requirement exactly the " +
+  "way our engineering team needs it to move fast.";
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
@@ -139,7 +139,12 @@ export async function handle(inp: ChatIn, authUser?: AuthUser | null): Promise<C
     if (s.state === "DISCOVER" && seen.length === 0) {
       return out(s, [GREETING], [chips(TRACK_CHIPS)]);
     }
-    return resume(s);
+    // Reload of an existing session: hand the stored transcript back so the
+    // chat pane shows the whole conversation, not just the resumed prompt.
+    const past = await db.recentMessages(s.id, 80);
+    const res = await resume(s);
+    res.history = past.map((m) => ({ role: m.role, content: m.content }));
+    return res;
   }
 
   if (inp.kind === "chip" && inp.chip_id === "restart") {

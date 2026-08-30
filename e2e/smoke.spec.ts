@@ -22,7 +22,7 @@ test("visitor signs up, picks a track and submits contact details", async ({ pag
   await page.getByRole("button", { name: "Continue", exact: true }).click();
 
   // Greeting + the four track chips render.
-  await expect(page.getByText("Namaste, I'm XOR Assist", { exact: false })).toBeVisible();
+  await expect(page.getByText("I'm XoR from Elecbits", { exact: false })).toBeVisible();
   await page.getByRole("button", { name: "Design a new product" }).click();
 
   // Track locked → contact form appears.
