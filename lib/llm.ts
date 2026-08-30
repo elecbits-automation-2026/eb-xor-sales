@@ -9,6 +9,7 @@
  */
 import Anthropic from "@anthropic-ai/sdk";
 
+import { brainContext } from "@/lib/brain";
 import { cfg } from "@/lib/config";
 import { ODM_SLOT_LABELS } from "@/lib/flows";
 import { retrieveContext } from "@/lib/knowledge";
@@ -103,10 +104,12 @@ export async function triage(history_: Msg[], userText: string): Promise<TriageR
   if (cfg.mockLlm) return mockTriage(userText);
   try {
     // Retrieval never throws (returns [] on any error), so a KB outage
-    // costs only the extra context, never the triage call itself.
+    // costs only the extra context, never the triage call itself. Same
+    // guarantee from the brain: cached Drive-doc text, or "".
     const chunks = await retrieveContext(userText);
+    const brain = await brainContext();
     const out = await callTool(
-      buildTriageSystem(chunks.slice(0, 3)),
+      buildTriageSystem(chunks.slice(0, 3), brain),
       history(history_, userText),
       TOOL_TRIAGE,
     );
@@ -171,10 +174,11 @@ export async function answerQuestion(history_: Msg[], userText: string): Promise
   }
   try {
     const chunks = await retrieveContext(userText);
+    const brain = await brainContext(); // never throws — cached text or ""
     const resp = await getClient().messages.create({
       model: cfg.model,
       max_tokens: 400,
-      system: buildQaSystem(chunks),
+      system: buildQaSystem(chunks, brain),
       messages: history(history_, userText),
     });
     return joinText(resp.content);

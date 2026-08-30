@@ -21,7 +21,8 @@ import { driveApi, sheets } from "./drive";
 import { getDb } from "./supabase";
 
 const REGISTER_HINT = "Eb-Master_Register";
-const ULM_HINT = "Eb-Central-ULM";
+/** Central folder hint — shared with the Drive-doc brain (lib/brain.ts). */
+export const ULM_HINT = "Eb-Central-ULM";
 const SALES_FOLDER = "Eb-07-Sales";
 const FUNNEL_NAME = "XOR-Sales-Funnel";
 const SHEET_MIME = "application/vnd.google-apps.spreadsheet";
@@ -58,8 +59,11 @@ interface DriveHit {
   mimeType: string;
 }
 
-/** Name search over everything the bot's identity can see, newest first. */
-async function search(q: string): Promise<DriveHit[]> {
+/**
+ * Name search over everything the bot's identity can see, newest first
+ * (`and trashed = false` is appended). Also used by lib/brain.ts.
+ */
+export async function search(q: string): Promise<DriveHit[]> {
   const res = await driveApi().files.list({
     q: `${q} and trashed = false`,
     fields: "files(id, name, mimeType, modifiedTime)",

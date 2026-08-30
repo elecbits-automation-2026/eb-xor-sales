@@ -109,12 +109,24 @@ inviting them to share what they're building.
 ${COMPANY_SNAPSHOT}`;
 
 /**
+ * The Drive-doc "brain" (lib/brain.ts) as a delimited prompt section.
+ * Sits BEFORE the volatile per-request excerpts: the brain text is stable
+ * for an hour, so keeping it early leaves the prompt prefix cache-friendly.
+ * Empty brain → empty string (prompts unchanged).
+ */
+function brainSection(brain: string): string {
+  if (!brain.trim()) return "";
+  return `\n\nCompany reference documents (internal SOPs — use for accurate answers, never quote IDs/pricing as promises):\n${brain}`;
+}
+
+/**
  * QA system prompt. With retrieved chunks: answer ONLY from the excerpts,
  * citing document names inline. Without: the static snapshot prompt
- * (python behaviour).
+ * (python behaviour). The Drive-doc brain, when present, is appended as a
+ * reference section ahead of the per-question excerpts.
  */
-export function buildQaSystem(chunks: KbMatch[]): string {
-  if (!chunks.length) return SYSTEM_QA;
+export function buildQaSystem(chunks: KbMatch[], brain = ""): string {
+  if (!chunks.length) return `${SYSTEM_QA}${brainSection(brain)}`;
   const excerpts = chunks
     .map((c) => `[from: ${c.document_name}]\n${c.content}`)
     .join("\n\n");
@@ -123,7 +135,7 @@ question using ONLY the knowledge-base excerpts below. Under 80 words, no
 prices, no firm timelines, no invented facts. Cite the document names you
 used inline, like "(from: <document name>)". If the answer isn't in the
 excerpts, say the sales engineering team will cover it on the call. End with
-one short line inviting them to share what they're building.
+one short line inviting them to share what they're building.${brainSection(brain)}
 
 Knowledge-base excerpts:
 
@@ -131,15 +143,16 @@ ${excerpts}`;
 }
 
 /**
- * Triage system prompt, optionally grounded with top knowledge-base chunks
- * (context only — classification rules stay unchanged).
+ * Triage system prompt, optionally grounded with the Drive-doc brain and top
+ * knowledge-base chunks (context only — classification rules stay unchanged).
  */
-export function buildTriageSystem(chunks: KbMatch[]): string {
-  if (!chunks.length) return SYSTEM_TRIAGE;
+export function buildTriageSystem(chunks: KbMatch[], brain = ""): string {
+  const base = `${SYSTEM_TRIAGE}${brainSection(brain)}`;
+  if (!chunks.length) return base;
   const excerpts = chunks
     .map((c) => `[from: ${c.document_name}]\n${c.content}`)
     .join("\n\n");
-  return `${SYSTEM_TRIAGE}
+  return `${base}
 
 Additional background from the knowledge base (context only):
 
