@@ -233,10 +233,18 @@ export async function generateLld(
   slots: Record<string, string>,
   contact: Record<string, string>,
   leadRef: string,
+  recent: Msg[] = [],
 ): Promise<string> {
   if (cfg.mockLlm) return templateLld(slots, contact, leadRef);
   const brief = Object.entries(slots)
     .map(([k, v]) => `- ${ODM_SLOT_LABELS[k] ?? k}: ${v}`)
+    .join("\n");
+  // The transcript usually carries MORE engineering signal than the slot
+  // values (protocol discussions, references, constraints stated in
+  // passing) — the architect must see it.
+  const convo = recent
+    .slice(-30)
+    .map((m) => `${m.role === "user" ? "Customer" : "XoR"}: ${m.content.slice(0, 280)}`)
     .join("\n");
   try {
     const brain = await brainContext(); // never throws — cached text or ""
@@ -246,14 +254,16 @@ export async function generateLld(
     const chunks = query ? await retrieveContext(query) : [];
     const resp = await getClient().messages.create({
       model: cfg.model,
-      max_tokens: 2048,
+      max_tokens: 3000,
       system: systemBlocks(buildLldSystem(brain), kbBackground(chunks.slice(0, 6))),
       messages: [
         {
           role: "user",
           content:
             `Intake ref ${leadRef} for ${contact["company"] ?? "the customer"}.\n` +
-            `Intake answers:\n${brief}\n\nWrite the LLD draft.`,
+            `Intake answers:\n${brief}\n\n` +
+            (convo ? `Conversation transcript:\n${convo}\n\n` : "") +
+            `Write the LLD draft.`,
         },
       ],
     });
