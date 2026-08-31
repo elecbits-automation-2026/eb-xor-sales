@@ -158,6 +158,12 @@ export default function LoginView({ gate }: { gate: AuthGate }) {
   const [pass, setPass] = useState("");
   const [rsEmail, setRsEmail] = useState("");
   const [newPass, setNewPass] = useState("");
+  // B2B profile — makes the account a real client record from day one and
+  // prefills the intake's contact card completely.
+  const [company, setCompany] = useState("");
+  const [phone, setPhone] = useState("");
+  const [designation, setDesignation] = useState("");
+  const [website, setWebsite] = useState("");
 
   // Sales-team dropdown (core.people) — hidden when the list is empty.
   const [agents, setAgents] = useState<string[]>([]);
@@ -223,11 +229,19 @@ export default function LoginView({ gate }: { gate: AuthGate }) {
       setErr("Password must be at least 8 characters.");
       return;
     }
+    if (phone.replace(/\D/g, "").length < 8) {
+      setErr("Enter a phone number we can actually reach.");
+      return;
+    }
     setBusy(true);
     try {
       const em = email.trim();
       const { needsEmailConfirm } = await signUp({
         name: name.trim(),
+        company: company.trim(),
+        phone: phone.trim(),
+        designation: designation.trim(),
+        website: website.trim() || undefined,
         email: em,
         password: pass,
         salesAgent: agent || undefined,
@@ -423,6 +437,45 @@ export default function LoginView({ gate }: { gate: AuthGate }) {
               onChange={(e) => setName(e.target.value)}
             />
           )}
+          {!signin && (
+            <input
+              id={`${uid}-company`}
+              className="lg-input"
+              type="text"
+              required
+              autoComplete="organization"
+              placeholder="Company name"
+              aria-label="Company name"
+              value={company}
+              onChange={(e) => setCompany(e.target.value)}
+            />
+          )}
+          {!signin && (
+            <input
+              id={`${uid}-designation`}
+              className="lg-input"
+              type="text"
+              required
+              autoComplete="organization-title"
+              placeholder="Your role (e.g. Founder, Head of Hardware)"
+              aria-label="Your role"
+              value={designation}
+              onChange={(e) => setDesignation(e.target.value)}
+            />
+          )}
+          {!signin && (
+            <input
+              id={`${uid}-phone`}
+              className="lg-input"
+              type="tel"
+              required
+              autoComplete="tel"
+              placeholder="Phone / WhatsApp number"
+              aria-label="Phone number"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+            />
+          )}
           <input
             id={`${uid}-email`}
             className="lg-input"
@@ -434,6 +487,18 @@ export default function LoginView({ gate }: { gate: AuthGate }) {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
           />
+          {!signin && (
+            <input
+              id={`${uid}-website`}
+              className="lg-input"
+              type="text"
+              autoComplete="url"
+              placeholder="Company website (optional)"
+              aria-label="Company website"
+              value={website}
+              onChange={(e) => setWebsite(e.target.value)}
+            />
+          )}
           <input
             id={`${uid}-pass`}
             className="lg-input"

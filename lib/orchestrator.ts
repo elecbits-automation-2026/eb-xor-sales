@@ -140,6 +140,10 @@ export async function handle(inp: ChatIn, authUser?: AuthUser | null): Promise<C
     s.data.auth_email = authUser.email;
     s.data.auth_name = authUser.name || null;
     s.data.sales_agent = authUser.sales_agent ?? null;
+    // The signup profile prefills the intake's contact card end to end —
+    // never overwriting anything the visitor already typed in chat.
+    if (authUser.company && !s.data.contact.company) s.data.contact.company = authUser.company;
+    if (authUser.phone && !s.data.contact.phone) s.data.contact.phone = authUser.phone;
   }
 
   if (inp.kind === "open") {
