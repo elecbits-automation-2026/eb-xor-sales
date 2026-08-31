@@ -21,11 +21,37 @@ export interface AuthUser {
   name: string;
   /** Elecbits sales agent chosen at signup (core.people), if any. */
   sales_agent?: string | null;
+  /** B2B profile captured at signup — prefills the intake contact card. */
+  company?: string | null;
+  phone?: string | null;
+  designation?: string | null;
+  website?: string | null;
+}
+
+/** Extra signup profile fields (stored as auth metadata). */
+export interface SignupProfile {
+  company?: string;
+  phone?: string;
+  designation?: string;
+  website?: string;
 }
 
 // ── memory backend ────────────────────────────────────────────────────────
 interface MemAuthState {
-  users: Map<string, { id: string; email: string; name: string; sales_agent?: string | null; passHash: string }>;
+  users: Map<
+    string,
+    {
+      id: string;
+      email: string;
+      name: string;
+      sales_agent?: string | null;
+      company?: string | null;
+      phone?: string | null;
+      designation?: string | null;
+      website?: string | null;
+      passHash: string;
+    }
+  >;
   tokens: Map<string, string>; // token -> user id
 }
 
@@ -50,6 +76,7 @@ export function memorySignUp(
   password: string,
   name: string,
   salesAgent = "",
+  profile: SignupProfile = {},
 ): { token: string; user: AuthUser } | { error: string; status: number } {
   const s = memAuth();
   const key = email.trim().toLowerCase();
@@ -58,11 +85,15 @@ export function memorySignUp(
   if ([...s.users.values()].some((u) => u.email === key)) {
     return { error: "an account with this email already exists — sign in instead", status: 409 };
   }
-  const user = {
+  const user: AuthUser = {
     id: randomUUID(),
     email: key,
     name: (name ?? "").trim(),
     sales_agent: salesAgent.trim() || null,
+    company: profile.company?.trim() || null,
+    phone: profile.phone?.trim() || null,
+    designation: profile.designation?.trim() || null,
+    website: profile.website?.trim() || null,
   };
   s.users.set(user.id, { ...user, passHash: hash(password) });
   const token = randomUUID() + randomUUID().replace(/-/g, "");
@@ -91,7 +122,16 @@ function memoryUser(token: string): AuthUser | null {
   if (!id) return null;
   const rec = s.users.get(id);
   return rec
-    ? { id: rec.id, email: rec.email, name: rec.name, sales_agent: rec.sales_agent ?? null }
+    ? {
+        id: rec.id,
+        email: rec.email,
+        name: rec.name,
+        sales_agent: rec.sales_agent ?? null,
+        company: rec.company ?? null,
+        phone: rec.phone ?? null,
+        designation: rec.designation ?? null,
+        website: rec.website ?? null,
+      }
     : null;
 }
 
@@ -123,14 +163,19 @@ export async function getUserFromRequest(req: Request): Promise<AuthUser | null>
     const u = data.user;
     // Require a confirmed email — the enquiry list keys on this address.
     if (!u.email_confirmed_at && !u.confirmed_at) return null;
+    const meta = (k: string): string | null => {
+      const v = u.user_metadata?.[k];
+      return typeof v === "string" && v.trim() ? v.trim() : null;
+    };
     return {
       id: u.id,
       email: u.email!.toLowerCase(),
-      name: typeof u.user_metadata?.name === "string" ? u.user_metadata.name : "",
-      sales_agent:
-        typeof u.user_metadata?.sales_agent === "string" && u.user_metadata.sales_agent
-          ? u.user_metadata.sales_agent
-          : null,
+      name: meta("name") ?? "",
+      sales_agent: meta("sales_agent"),
+      company: meta("company"),
+      phone: meta("phone"),
+      designation: meta("designation"),
+      website: meta("website"),
     };
   } catch (err) {
     console.error("auth token verification failed:", err);
