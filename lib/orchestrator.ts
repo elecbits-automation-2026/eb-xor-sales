@@ -214,11 +214,7 @@ export async function handle(inp: ChatIn, authUser?: AuthUser | null): Promise<C
       case "PRODUCT_DETAILS":
         return await productDetails(s, inp);
       case "DONE":
-        return await out(
-          s,
-          ["This enquiry is logged and the team will be in touch. Want to raise another one?"],
-          [chips([{ id: "restart", label: "Start another enquiry" }])],
-        );
+        return await done(s, inp, history);
     }
   } catch (err) {
     console.error(`orchestrator error in state ${state}`, err);
@@ -1098,6 +1094,82 @@ const SANCTION_CHIPS = [
   { id: "sanction:no", label: "Not yet — just file it" },
 ];
 
+/** Chips shown while a filed enquiry sits in DONE — sanction is THE last
+ *  stage, so the apply chip leads until the application is in. */
+function doneChips(s: SessionRow): { id: string; label: string }[] {
+  const out: { id: string; label: string }[] = [];
+  if (s.track === "ODM" && s.data.sanction_requested !== true) {
+    out.push({ id: "sanction:apply", label: "Apply for project sanction" });
+  }
+  out.push({ id: "restart", label: "Start another enquiry" });
+  return out;
+}
+
+/**
+ * A FILED enquiry stays a live conversation: basic questions get real
+ * answers, and everything steers toward the one remaining step — project
+ * sanction. Once the application is in, the loop closes.
+ */
+async function done(s: SessionRow, inp: ChatIn, history: Msg[]): Promise<ChatOut> {
+  const d = s.data;
+  const pending = s.track === "ODM" && d.sanction_requested !== true;
+
+  const applySanction = async (): Promise<ChatOut> => {
+    d.sanction_requested = true;
+    await noteTask(s.id, "Apply for project sanction", "completed", d.deal_id ?? d.lead_ref);
+    if (d.lead_id) {
+      try {
+        await getDb().updateLead(d.lead_id, {
+          summary: `${d.slots.product_concept ?? "ODM enquiry"} · SANCTION REQUESTED`.slice(0, 200),
+        });
+      } catch (err) {
+        console.error(`sanction flag on lead failed session=${s.id}`, err);
+      }
+    }
+    return out(
+      s,
+      [
+        `Sanction application is in for ${d.deal_id ?? d.lead_ref} — once the ` +
+          "project is sanctioned, the build gets scheduled and you'll see it " +
+          "move in your account. Anything else you want to ask meanwhile?",
+      ],
+      [chips(doneChips(s))],
+    );
+  };
+
+  if (inp.kind === "chip" && inp.chip_id === "sanction:apply") return applySanction();
+
+  if (inp.kind === "text" && inp.text) {
+    // Explicit sanction ask, or a bare yes to the standing nudge → apply.
+    if (
+      pending &&
+      (sanctionIntent(inp.text) ||
+        /^\s*(yes|yeah|yep|ya|sure|haan?|ji|ok(ay)?|apply|go ahead|proceed|chalo|karo)\b/i.test(
+          inp.text,
+        ))
+    ) {
+      return applySanction();
+    }
+    // A basic question about the filed enquiry, the process, Elecbits —
+    // answer properly, then keep the sanction door visibly open.
+    const ans = await llm.answerQuestion(history, inp.text);
+    const nudge = pending
+      ? "\n\nAnd whenever you're ready — the one step left is project sanction; say the word and I'll apply."
+      : "";
+    return out(s, [`${ans}${nudge}`], [chips(doneChips(s))]);
+  }
+
+  return out(
+    s,
+    [
+      pending
+        ? "This enquiry is filed. The last stage is project sanction — shall I apply? You can also ask me anything about it, or start another enquiry."
+        : "This enquiry is filed with your sanction application in. Ask me anything about it, or start another one.",
+    ],
+    [chips(doneChips(s))],
+  );
+}
+
 /**
  * Keep the enquiry's sidebar label in sync with what it actually IS. IDs
  * are issued before the product is described, so the lead starts life
@@ -1854,7 +1926,7 @@ function resumeWidget(s: SessionRow): Widget | null {
     case "ODM_SANCTION":
       return chips(SANCTION_CHIPS);
     case "DONE":
-      return chips([{ id: "restart", label: "Start another enquiry" }]);
+      return chips(doneChips(s));
     default:
       return null;
   }
@@ -1878,7 +1950,10 @@ async function resume(s: SessionRow): Promise<ChatOut> {
     EMS_DETAILS: "Just the build details left.",
     PRODUCT_CATEGORY: "Pick the closest category.",
     PRODUCT_DETAILS: "Just the last form to go.",
-    DONE: "This enquiry is logged. Want to start another?",
+    DONE:
+      s.track === "ODM" && s.data.sanction_requested !== true
+        ? "This enquiry is filed — the last stage is project sanction. Shall I apply? Or ask me anything about it."
+        : "This enquiry is filed. Ask me anything about it, or start another.",
   };
   const w = resumeWidget(s);
   return out(s, [promptsByState[s.state] ?? "Go on…"], w ? [w] : [], { persist: false });
