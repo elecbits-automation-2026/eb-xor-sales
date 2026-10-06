@@ -44,6 +44,7 @@ export async function GET(req: NextRequest) {
     kb?: { documents: number; last_synced: string | null; embedder: string } | { error: string };
     pdf?: { ok: true; bytes: number } | { error: string };
     lld_templates?: { chars: number } | "empty" | { error: string };
+    uploads?: "ok" | { error: string };
   } = {
     ok: true,
     mock_llm: cfg.mockLlm,
@@ -112,6 +113,31 @@ export async function GET(req: NextRequest) {
         body.lld_templates = tpl ? { chars: tpl.length } : "empty";
       } catch (e) {
         body.lld_templates = { error: errText(e) };
+      }
+    }
+    // Can a browser actually upload? Exercise the EXACT attachment path:
+    // signed URL → PUT bytes → stat — the token-authorized route the chat's
+    // paperclip uses, not just a service-role write. Fixed path + upsert:
+    // the probe reuses one object instead of accreting junk.
+    if (cfg.supabaseUrl && cfg.supabaseServiceRoleKey) {
+      try {
+        const { getDb } = await import("@/lib/supabase");
+        const db = getDb();
+        const probePath = "health-probe/upload.txt";
+        const { url } = await db.signedUploadUrl(probePath);
+        const put = await fetch(url, {
+          method: "PUT",
+          headers: { "content-type": "text/plain", "x-upsert": "true" },
+          body: "xor upload probe",
+        });
+        if (!put.ok) {
+          body.uploads = { error: `signed PUT returned ${put.status}` };
+        } else {
+          const stat = await db.statObject(probePath);
+          body.uploads = stat ? "ok" : { error: "uploaded object not found on stat" };
+        }
+      } catch (e) {
+        body.uploads = { error: errText(e) };
       }
     }
     // Can this deploy actually render the branded PDF? The exact error
