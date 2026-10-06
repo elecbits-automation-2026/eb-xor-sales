@@ -316,11 +316,39 @@ export async function handleUpload(
   itemKey: string,
   filename: string,
 ): Promise<ChatOut> {
-  // Ad-hoc attachments (paperclip / paste) never touch the checklist or
-  // advance state — acknowledge and re-present whatever was on screen.
+  // Ad-hoc attachments (paperclip / paste) never touch the checklist. If we
+  // could READ the file, its content flows through the same brain as words
+  // the customer typed — a requirements doc fills slots, not a dead ack.
   if (itemKey === ATTACHMENT_ITEM.key) {
+    const doc = s.data.attachments_text?.find((a) => a.name === filename);
+    const readable =
+      doc &&
+      (s.state === "DISCOVER" ||
+        s.state === "TRACK_CONFIRM" ||
+        s.state === "ODM_SLOTS" ||
+        s.state === "ODM_REVIEW");
+    if (readable) {
+      const docMsg =
+        `[Attached document "${doc.name}" — extracted text]\n` + doc.text.slice(0, 7000);
+      const db = getDb();
+      await db.addMessage(s.id, "user", `📎 ${doc.name} (attached; content below)\n${doc.text.slice(0, 2000)}`);
+      const history = await db.recentMessages(s.id, 12);
+      const lead = `Read ${doc.name} — pulling the requirement out of it.`;
+      let next: ChatOut;
+      if (s.state === "ODM_SLOTS" || s.state === "ODM_REVIEW") {
+        s.state = "ODM_SLOTS";
+        next = await odmSlots(s, { session_id: s.id, kind: "text", text: docMsg, channel: "text" }, history);
+      } else {
+        next = await discover(s, { session_id: s.id, kind: "text", text: docMsg }, history);
+      }
+      return { ...next, messages: [lead, ...next.messages] };
+    }
     const w = resumeWidget(s);
-    return out(s, [`Got it — ${filename} is attached to this enquiry.`], w ? [w] : []);
+    const note =
+      !doc && /\.doc$/i.test(filename)
+        ? " I can't read legacy .doc files though — re-save it as .docx or PDF and attach again, or paste the key points."
+        : "";
+    return out(s, [`Got it — ${filename} is attached to this enquiry.${note}`], w ? [w] : []);
   }
   if (s.state !== "EMS_CHECKLIST") {
     const w = resumeWidget(s);
@@ -987,6 +1015,7 @@ async function odmBenchReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
             transcript,
             { prior: priorMd, feedback },
             progress,
+            s.data.attachments_text ?? [],
           );
           progress("rendering the branded PDF");
           return storeDoc(s, "bench", benchMd, progress);
@@ -1056,6 +1085,7 @@ async function odmLldReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
             transcript,
             { prior: priorMd, feedback },
             progress,
+            s.data.attachments_text ?? [],
           );
           progress("rendering the branded PDF");
           return storeDoc(s, "lld", lldMd, progress);
@@ -1271,6 +1301,7 @@ async function odmReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
               transcript,
               undefined,
               progress,
+              s.data.attachments_text ?? [],
             );
             progress("rendering the branded PDF");
             return storeDoc(s, "bench", benchMd, progress);
@@ -1324,6 +1355,7 @@ async function odmReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
               transcript,
               undefined,
               progress,
+              s.data.attachments_text ?? [],
             );
             progress("rendering the branded PDF");
             return storeDoc(s, "lld", lldMd, progress);
