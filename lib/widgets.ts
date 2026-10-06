@@ -133,6 +133,10 @@ export interface SessionData {
   /** Deal folder refs — deal_id stamps WHICH deal they belong to, because a
    * session can file more than one deal (back-nav, track switches). */
   drive: { folder_id?: string; folder_url?: string; deal_id?: string };
+  /** Extracted text of chat-uploaded attachments (newest last, capped) —
+   * XoR READS what customers attach and grounds the intake + documents
+   * with it. */
+  attachments_text?: { name: string; text: string }[];
   finalized: boolean;
 }
 

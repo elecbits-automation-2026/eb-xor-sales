@@ -217,3 +217,56 @@ describe("attachment roundtrip", () => {
     });
   });
 });
+
+describe("attachment reading", () => {
+  it("extracts a text doc's content, records it, and feeds it into the intake", async () => {
+    // Reach ODM_SLOTS the same way the flow tests do.
+    const opened = await chat({ kind: "open" });
+    const sid = opened.session_id;
+    let cur = await chat({
+      session_id: sid,
+      kind: "text",
+      text: "we want you to design a smart water purifier controller",
+    });
+    expect(cur.meta.state).toBe("TRACK_CONFIRM");
+    cur = await chat({ session_id: sid, kind: "chip", chip_id: "confirm:yes" });
+    cur = await chat({
+      session_id: sid,
+      kind: "form",
+      form: {
+        form_id: "contact",
+        values: {
+          name: "Ravi Rao",
+          company: "AquaPure",
+          email: "ravi@aquapure.in",
+          phone: "+91 9000000000",
+        },
+      },
+    });
+    if (cur.meta.state === "CLIENT_INDUSTRY") {
+      cur = await chat({ session_id: sid, kind: "chip", chip_id: "sec:4" });
+      cur = await chat({ session_id: sid, kind: "chip", chip_id: "org:0" });
+    }
+    expect(cur.meta.state).toBe("ODM_SLOTS");
+
+    const spec =
+      "Requirement: RO purifier controller, 24V pump control, TDS sensing, " +
+      "UV lamp interlock, RS485 to the service cloud, 10k units/year.";
+    const res = await uploadFile(sid, "attachment", "requirements.md", spec);
+    expect(res.status).toBe(200);
+
+    // The content was READ: recorded on the session…
+    const db = getDb();
+    const s = await db.getSession(sid);
+    const rec = s!.data.attachments_text?.find((a) => a.name === "requirements.md");
+    expect(rec?.text).toContain("TDS sensing");
+    // …announced as read (not a blind "file received")…
+    expect(res.out!.messages[0]).toContain("Read requirements.md");
+    // …and pushed through the intake brain (mock mode maps it onto the
+    // expected slot), advancing the question count.
+    expect(Object.keys(s!.data.slots).length).toBeGreaterThan(0);
+    expect(
+      Object.values(s!.data.slots).some((v) => v.includes("Attached document")),
+    ).toBe(true);
+  });
+});

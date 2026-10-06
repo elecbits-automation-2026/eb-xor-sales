@@ -87,6 +87,29 @@ export async function POST(req: NextRequest) {
     drive_file_id: null,
   });
 
+  // READ the document: extract its text so the orchestrator can treat the
+  // content like words the customer said (requirement docs, spec sheets).
+  // Best-effort — an unreadable file still attaches fine.
+  try {
+    const { extractableExt, extractDocText } = await import("@/lib/extract");
+    if (extractableExt(safe)) {
+      const bytes = await db.getObject(expected);
+      const text = bytes ? await extractDocText(bytes, safe) : null;
+      if (text) {
+        const list = s.data.attachments_text ?? [];
+        list.push({ name: safe, text });
+        // Keep the most recent ~40K chars of attachment text in play.
+        let total = 0;
+        s.data.attachments_text = list
+          .reverse()
+          .filter((a) => (total += a.text.length) <= 40_000)
+          .reverse();
+      }
+    }
+  } catch (err) {
+    console.error(`attachment extraction failed session=${s.id} file=${safe}`, err);
+  }
+
   // Deal folder already exists (IDs are issued early)? Deliver the file to
   // Drive right now — best-effort; a failure leaves it staged and the
   // finalize handoff (with its retry queue) delivers it instead. The folder

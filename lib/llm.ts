@@ -309,6 +309,16 @@ export async function answerQuestion(history_: Msg[], userText: string): Promise
 }
 
 // ─────────────────────────── LLD generation ──────────────────────────────
+/** Customer-attached requirement docs, clipped for a generation prompt. */
+function docsSection(attachments: { name: string; text: string }[]): string {
+  if (!attachments.length) return "";
+  const body = attachments
+    .map((a) => `--- ${a.name} ---\n${a.text.slice(0, 6000)}`)
+    .join("\n\n")
+    .slice(0, 12_000);
+  return `Attached requirement documents (extracted text — authoritative customer input):\n${body}\n\n`;
+}
+
 /**
  * Long-document author shared by the LLD and benchmark generators: retries
  * a failed attempt once, continues a max_tokens-truncated draft in place,
@@ -417,6 +427,7 @@ export async function generateLld(
   recent: Msg[] = [],
   revision?: { prior: string; feedback: string },
   onStage?: (stage: string) => void,
+  attachments: { name: string; text: string }[] = [],
 ): Promise<string> {
   if (cfg.mockLlm) return templateLld(slots, contact, leadRef);
   const stage = onStage ?? (() => undefined);
@@ -448,6 +459,7 @@ export async function generateLld(
     userContent:
       `Intake ref ${leadRef} for ${contact["company"] ?? "the customer"}.\n` +
       `Intake answers:\n${brief}\n\n` +
+      docsSection(attachments) +
       (convo ? `Conversation transcript:\n${convo}\n\n` : "") +
       (revision
         ? `Previous draft:\n${revision.prior.slice(0, 12000)}\n\n` +
@@ -469,6 +481,7 @@ export async function generateBenchmark(
   recent: Msg[] = [],
   revision?: { prior: string; feedback: string },
   onStage?: (stage: string) => void,
+  attachments: { name: string; text: string }[] = [],
 ): Promise<string> {
   if (cfg.mockLlm) return templateBenchmark(slots, contact, leadRef);
   const stage = onStage ?? (() => undefined);
@@ -491,6 +504,7 @@ export async function generateBenchmark(
     userContent:
       `Intake ref ${leadRef} for ${contact["company"] ?? "the customer"}.\n` +
       `Intake answers:\n${brief}\n\n` +
+      docsSection(attachments) +
       (convo ? `Conversation transcript:\n${convo}\n\n` : "") +
       (revision
         ? `Previous report:\n${revision.prior.slice(0, 12000)}\n\n` +
