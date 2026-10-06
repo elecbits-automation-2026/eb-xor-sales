@@ -110,9 +110,14 @@ export const EMS_CHECKLIST: ChecklistItemDef[] = [
 export const ATTACHMENT_ITEM: ChecklistItemDef = {
   key: "attachment",
   label: "Attachment",
+  // The ad-hoc "anything useful" slot — broad on purpose (docs, decks,
+  // images, audio/video notes, CAD, firmware, archives); executables and
+  // scripts stay out.
   accept:
-    ".png,.jpg,.jpeg,.webp,.gif,.heic,.pdf,.zip,.rar,.7z,.xlsx,.xls,.csv," +
-    ".docx,.doc,.step,.stp,.txt,.md",
+    ".png,.jpg,.jpeg,.webp,.gif,.heic,.svg,.bmp,.tif,.tiff,.pdf," +
+    ".zip,.rar,.7z,.tar,.gz,.xlsx,.xls,.csv,.docx,.doc,.pptx,.ppt," +
+    ".txt,.md,.json,.xml,.mp3,.wav,.m4a,.ogg,.aac,.mp4,.mov,.webm," +
+    ".step,.stp,.iges,.igs,.dxf,.dwg,.sch,.brd,.kicad_pcb,.gbr,.hex,.bin",
   required: false,
   desc: "Any supporting file — image, document, archive, CAD.",
 };

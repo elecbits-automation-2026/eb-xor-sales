@@ -320,7 +320,15 @@ export default function Chat() {
    */
   const uploadFile = useCallback(
     async (item: Pick<ChecklistItemDef, "key">, file: File) => {
-      if (busyRef.current || !sessionRef.current) return;
+      // Never fail silently — a click that does nothing reads as "broken".
+      if (busyRef.current) {
+        addMsg("One second — I'm mid-reply. Attach it again right after.", "sys");
+        return;
+      }
+      if (!sessionRef.current) {
+        addMsg("The chat is still connecting — give it a second and try again.", "sys");
+        return;
+      }
       busyRef.current = true;
       setBusy(true);
       emit("xor:busy");
@@ -360,7 +368,7 @@ export default function Chat() {
           body: file,
         });
         if (!put.ok) {
-          addMsg("That file didn't go through — try again?", "sys");
+          addMsg(`That file didn't go through (upload error ${put.status}) — try again?`, "sys");
           return;
         }
 
