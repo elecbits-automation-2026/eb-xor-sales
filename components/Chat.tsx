@@ -165,6 +165,11 @@ export default function Chat() {
   }, []);
 
   // ── transport ───────────────────────────────────────────────────────────
+  // After a dropped connection the SERVER usually finishes the work — watch
+  // the background tasks and pull the result into this chat automatically
+  // instead of leaving the customer blind ("is it making changes??").
+  const resyncRef = useRef<(() => void) | null>(null);
+  const resyncActiveRef = useRef(false);
   const post = useCallback(
     async (payload: Omit<ChatIn, "session_id">, sessionOverride?: string) => {
       if (busyRef.current) return;
@@ -189,7 +194,13 @@ export default function Chat() {
         if (!r.ok) throw new Error(`bad status ${r.status}`);
         render((await r.json()) as ChatOut);
       } catch {
-        addMsg("Connection hiccup — please try that again.", "sys");
+        addMsg(
+          "The connection dropped mid-work — the server usually finishes anyway. " +
+            "I'm watching the background tasks and will pick up the result here " +
+            "the moment they settle.",
+          "sys",
+        );
+        resyncRef.current?.();
       } finally {
         busyRef.current = false;
         setBusy(false);
@@ -200,6 +211,38 @@ export default function Chat() {
     },
     [addMsg, render],
   );
+
+  /** Poll the task feed until nothing is running, then re-open the session
+   *  so the chat shows the landed result (draft card included). */
+  useEffect(() => {
+    resyncRef.current = () => {
+      if (resyncActiveRef.current || !sessionRef.current) return;
+      resyncActiveRef.current = true;
+      const sid = sessionRef.current;
+      let tries = 0;
+      const timer = window.setInterval(async () => {
+        if (++tries > 160 || sessionRef.current !== sid) {
+          window.clearInterval(timer);
+          resyncActiveRef.current = false;
+          return;
+        }
+        try {
+          const r = await fetch(`/api/tasks?session=${encodeURIComponent(sid)}`);
+          if (!r.ok) return;
+          const b = (await r.json()) as { tasks?: { status: string }[] };
+          if ((b.tasks ?? []).some((t) => t.status === "running")) return; // still working
+          window.clearInterval(timer);
+          resyncActiveRef.current = false;
+          if (!busyRef.current) {
+            addMsg("Reconnected — here's where we are.", "sys");
+            void post({ kind: "open" }, sid);
+          }
+        } catch {
+          // transient — next tick retries
+        }
+      }, 6000);
+    };
+  }, [addMsg, post]);
 
   // Open (or resume) the session on mount. ?new=1 forces a fresh session
   // (used by "+ New enquiry" links) and is stripped from the URL.

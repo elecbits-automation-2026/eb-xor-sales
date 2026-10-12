@@ -991,6 +991,10 @@ async function odmBenchReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
       return odmBenchReview(s, { session_id: s.id, kind: "chip", chip_id: "bench:accept" });
     }
   }
+  if ((inp.kind === "text" && inp.text) || (inp.kind === "chip" && inp.chip_id === "bench:regen")) {
+    const running = await runningGeneration(s.id);
+    if (running) return generationStatus(s, running);
+  }
   const feedback =
     inp.kind === "text" && inp.text
       ? inp.text
@@ -1061,6 +1065,13 @@ async function odmLldReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
     }
     if (acceptIntent(inp.text)) return askSanction(s);
   }
+  // One rewrite at a time: while a draft/revision runs, ANY further text
+  // ("are you making changes?", more feedback) gets a status reply, never a
+  // second concurrent generation.
+  if ((inp.kind === "text" && inp.text) || (inp.kind === "chip" && inp.chip_id === "lld:regen")) {
+    const running = await runningGeneration(s.id);
+    if (running) return generationStatus(s, running);
+  }
   const feedback =
     inp.kind === "text" && inp.text
       ? inp.text
@@ -1121,6 +1132,47 @@ async function odmLldReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
 function errShort(e: unknown): string {
   const raw = e instanceof Error ? e.message : String(e);
   return raw.replace(/\s+/g, " ").slice(0, 140);
+}
+
+/** Customer-visible generation steps — one of these runs at a time. */
+const GEN_LABELS = /^(Draft|Revise) the (LLD|benchmark report)$/;
+
+/** The generation currently in flight for this session, if any. Rows gone
+ *  quiet past the serverless window are orphans, not live work. */
+async function runningGeneration(sessionId: string) {
+  try {
+    const tasks = await getDb().tasksForSession(sessionId);
+    const now = Date.now();
+    return (
+      tasks.find(
+        (t) =>
+          t.status === "running" &&
+          GEN_LABELS.test(t.label) &&
+          now - Date.parse(t.updated_at || t.created_at) < 15 * 60_000,
+      ) ?? null
+    );
+  } catch (err) {
+    console.error(`running-generation lookup failed session=${sessionId}`, err);
+    return null;
+  }
+}
+
+/** Status reply while a draft/revision is being written — never a dead end,
+ *  never a SECOND concurrent rewrite ("are you making changes?" must not
+ *  spawn one). */
+async function generationStatus(
+  s: SessionRow,
+  running: { label: string; detail: string | null; created_at: string },
+): Promise<ChatOut> {
+  const mins = Math.max(1, Math.round((Date.now() - Date.parse(running.created_at)) / 60_000));
+  return out(s, [
+    `Yes — "${running.label}" is running right now (${mins} min in · ` +
+      `${running.detail ?? "working"}). One rewrite at a time: the new draft ` +
+      "posts here the moment it lands, and the Background tasks panel on the " +
+      "right shows the live stage. If this chat loses connection, the work " +
+      "continues on the server — I'll pick the result up here. If you wanted " +
+      "MORE changes, send them again once this pass lands.",
+  ]);
 }
 
 const SANCTION_CHIPS = [
@@ -1284,6 +1336,8 @@ async function odmReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
   const db = getDb();
   if (inp.kind === "chip") {
     if (inp.chip_id === "bench:generate") {
+      const running = await runningGeneration(s.id);
+      if (running) return generationStatus(s, running);
       // Outcome A: the market bench + product definition, per the
       // benchmark playbook — its §6 table then anchors the LLD.
       if (!s.data.lead_ref) s.data.lead_ref = await db.nextLeadRef();
@@ -1340,6 +1394,8 @@ async function odmReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
       );
     }
     if (inp.chip_id === "lld:generate") {
+      const running = await runningGeneration(s.id);
+      if (running) return generationStatus(s, running);
       if (!s.data.lead_ref) s.data.lead_ref = await db.nextLeadRef();
       const transcript = await db.recentMessages(s.id, 40);
       let fname: string;
@@ -1991,8 +2047,26 @@ async function resume(s: SessionRow): Promise<ChatOut> {
         ? "This enquiry is filed — the last stage is project sanction. Shall I apply? Or ask me anything about it."
         : "This enquiry is filed. Ask me anything about it, or start another.",
   };
+  // Review states re-present the DOCUMENT too — after a reconnect or a
+  // reload, the draft's download card must come back with the chips.
+  const widgets: Widget[] = [];
+  if (s.state === "ODM_LLD_REVIEW" && s.data.lld_file) {
+    widgets.push(
+      card("LLD draft", s.data.lld_file, [
+        { label: "Open the LLD draft", url: `/api/download/${s.id}/${encodeURIComponent(s.data.lld_file)}` },
+      ]),
+    );
+  }
+  if (s.state === "ODM_BENCH_REVIEW" && s.data.bench_file) {
+    widgets.push(
+      card("Product Definition & Benchmark Report", s.data.bench_file, [
+        { label: "Open the report", url: `/api/download/${s.id}/${encodeURIComponent(s.data.bench_file)}` },
+      ]),
+    );
+  }
   const w = resumeWidget(s);
-  return out(s, [promptsByState[s.state] ?? "Go on…"], w ? [w] : [], { persist: false });
+  if (w) widgets.push(w);
+  return out(s, [promptsByState[s.state] ?? "Go on…"], widgets, { persist: false });
 }
 
 function resumeOdmQuestion(s: SessionRow): string {
