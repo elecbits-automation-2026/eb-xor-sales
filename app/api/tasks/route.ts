@@ -32,15 +32,22 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ tasks: [] });
   }
   // Sweep orphans: live long-runs keep bumping updated_at via their stage
-  // narration, so only a genuinely dead run trips this.
+  // narration, so only a genuinely dead run trips this. The write is
+  // conditional on status=running — a real completion landing concurrently
+  // is never overwritten — and the advice matches the row: generations have
+  // a retry chip in the chat; infrastructure steps are retried by the
+  // system on its own.
+  const { GEN_LABELS } = await import("@/lib/tasks");
   const now = Date.now();
   for (const t of tasks) {
     const last = Date.parse(t.updated_at || t.created_at);
     if (t.status === "running" && Number.isFinite(last) && now - last > STALE_RUNNING_MS) {
       t.status = "failed";
-      t.detail = "cut off mid-run (connection or time window) — retry from the chat";
+      t.detail = GEN_LABELS.test(t.label)
+        ? "cut off mid-run (connection or time window) — hit the chip in the chat to run it again"
+        : "cut off mid-run — the system retries this step automatically";
       void getDb()
-        .updateTask(t.id, { status: "failed", detail: t.detail })
+        .failTaskIfStillRunning(t.id, t.detail)
         .catch(() => undefined);
     }
   }
