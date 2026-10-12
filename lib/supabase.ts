@@ -204,6 +204,9 @@ export interface Db {
     detail?: string | null,
   ): Promise<TaskRow>;
   updateTask(id: string, patch: Partial<Pick<TaskRow, "status" | "detail">>): Promise<void>;
+  /** Flip a task to failed ONLY while it is still running — a real
+   *  completion landing concurrently must never be overwritten. */
+  failTaskIfStillRunning(id: string, detail: string): Promise<void>;
   tasksForSession(sessionId: string): Promise<TaskRow[]>;
 
   // Storage (private bucket; paths "{session_id}/{item_key}--{filename}"
@@ -559,14 +562,27 @@ class SupabaseDb implements Db {
   }
 
   async tasksForSession(sessionId: string): Promise<TaskRow[]> {
-    return SupabaseDb.check(
+    // NEWEST 80, returned oldest-first — ascending+limit silently returned
+    // the OLDEST 80, hiding a running generation in long sessions.
+    const rows = SupabaseDb.check(
       await this.client
         .from("tasks")
         .select("*")
         .eq("session_id", sessionId)
-        .order("created_at", { ascending: true })
+        .order("created_at", { ascending: false })
         .limit(80),
     ) as unknown as TaskRow[];
+    return rows.reverse();
+  }
+
+  async failTaskIfStillRunning(id: string, detail: string): Promise<void> {
+    SupabaseDb.check(
+      await this.client
+        .from("tasks")
+        .update({ status: "failed", detail, updated_at: new Date().toISOString() })
+        .eq("id", id)
+        .eq("status", "running"),
+    );
   }
 
   async signedUploadUrl(path: string): Promise<{ url: string; token: string }> {
@@ -945,6 +961,15 @@ class MemoryDb implements Db {
 
   async tasksForSession(sessionId: string): Promise<TaskRow[]> {
     return structuredClone(this.s.tasks.filter((t) => t.session_id === sessionId).slice(-80));
+  }
+
+  async failTaskIfStillRunning(id: string, detail: string): Promise<void> {
+    const t = this.s.tasks.find((x) => x.id === id);
+    if (t && t.status === "running") {
+      t.status = "failed";
+      t.detail = detail;
+      t.updated_at = new Date().toISOString();
+    }
   }
 
   async signedUploadUrl(path: string): Promise<{ url: string; token: string }> {

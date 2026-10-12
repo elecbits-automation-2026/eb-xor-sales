@@ -26,7 +26,7 @@ import {
 } from "./flows";
 import * as llm from "./llm";
 import { getDb, type ClientRow, type SessionRow } from "./supabase";
-import { noteTask, trackTask } from "./tasks";
+import { GEN_LABELS, noteTask, trackTask } from "./tasks";
 import { istHuman, istTimestamp } from "./util";
 import type {
   ChatIn,
@@ -114,8 +114,11 @@ async function out(
   // persisting them stacked a duplicate "This enquiry is logged…" per reload.
   if (opts.persist !== false) {
     for (const m of messages) await db.addMessage(s.id, "assistant", m);
+    await db.saveSession(s);
+  } else {
+    // A re-presented resume mutates nothing — writing the (possibly stale)
+    // row back here could erase a concurrently finishing run's pointers.
   }
-  await db.saveSession(s);
   // State transitions + lead_ref only — never PII (names, emails, message text).
   console.info(
     `xor session=${s.id} state=${s.state}` +
@@ -304,6 +307,10 @@ async function goBack(s: SessionRow): Promise<ChatOut> {
     default:
       break; // DISCOVER / DONE — nowhere to go
   }
+  // resume() deliberately never writes the session row (a re-open racing a
+  // finishing generation must not clobber it) — so back-navigation's own
+  // mutations persist here, where the state is fresh by construction.
+  await getDb().saveSession(s);
   return resume(s);
 }
 
@@ -955,6 +962,12 @@ async function fileDocxToDrive(
 /** Iterative benchmark-report editing (Outcome A): revise, then LLD or file. */
 async function odmBenchReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
   const db = getDb();
+  // While a generation runs, EVERY input gets the status reply — accepting,
+  // filing or re-asking mid-run would race the finishing run's writes.
+  {
+    const running = await runningGeneration(s.id);
+    if (running) return generationStatus(s, running);
+  }
   if (inp.kind === "chip" && inp.chip_id === "bench:accept") {
     s.state = "ODM_REVIEW";
     return out(
@@ -1007,7 +1020,8 @@ async function odmBenchReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
       fname = await trackTask(
         s.id,
         "Revise the benchmark report",
-        async (progress) => {
+        async (progress, taskId) => {
+          await assertSoleGeneration(s.id, taskId);
           const benchMd = await llm.generateBenchmark(
             s.data.slots,
             s.data.contact,
@@ -1050,6 +1064,10 @@ async function odmBenchReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
 /** Iterative LLD editing: revise on feedback, file on approval. */
 async function odmLldReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
   const db = getDb();
+  {
+    const running = await runningGeneration(s.id);
+    if (running) return generationStatus(s, running);
+  }
   if (inp.kind === "chip" && inp.chip_id === "lld:accept") return askSanction(s);
   // "great now lets submit for sanction" / "file it" in words is an ACCEPT
   // (with sanction named explicitly, the question is already answered) —
@@ -1077,7 +1095,8 @@ async function odmLldReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
       fname = await trackTask(
         s.id,
         "Revise the LLD",
-        async (progress) => {
+        async (progress, taskId) => {
+          await assertSoleGeneration(s.id, taskId);
           const lldMd = await llm.generateLld(
             s.data.slots,
             s.data.contact,
@@ -1121,6 +1140,65 @@ async function odmLldReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
 function errShort(e: unknown): string {
   const raw = e instanceof Error ? e.message : String(e);
   return raw.replace(/\s+/g, " ").slice(0, 140);
+}
+
+/** The generation currently in flight for this session, if any. Rows gone
+ *  quiet past the serverless window are orphans, not live work. */
+async function runningGeneration(sessionId: string) {
+  try {
+    const tasks = await getDb().tasksForSession(sessionId);
+    const now = Date.now();
+    return (
+      tasks.find(
+        (t) =>
+          t.status === "running" &&
+          GEN_LABELS.test(t.label) &&
+          now - Date.parse(t.updated_at || t.created_at) < 15 * 60_000,
+      ) ?? null
+    );
+  } catch (err) {
+    console.error(`running-generation lookup failed session=${sessionId}`, err);
+    return null;
+  }
+}
+
+/** A second generation must never start while one runs — called INSIDE the
+ *  tracked step (after its running row exists) so two near-simultaneous
+ *  requests cannot both pass a read-only pre-check: the later row loses. */
+async function assertSoleGeneration(sessionId: string, myTaskId: string | null): Promise<void> {
+  const tasks = await getDb().tasksForSession(sessionId);
+  const mine = myTaskId ? tasks.find((t) => t.id === myTaskId) : null;
+  const now = Date.now();
+  const rival = tasks.find(
+    (t) =>
+      t.status === "running" &&
+      GEN_LABELS.test(t.label) &&
+      t.id !== myTaskId &&
+      now - Date.parse(t.updated_at || t.created_at) < 15 * 60_000 &&
+      (!mine ||
+        t.created_at < mine.created_at ||
+        (t.created_at === mine.created_at && t.id < mine.id)),
+  );
+  if (rival) {
+    throw new Error(`"${rival.label}" was already in flight — this run stands down`);
+  }
+}
+
+/** Status reply while a draft/revision is being written — never a dead end,
+ *  never a SECOND concurrent rewrite ("are you making changes?" must not
+ *  spawn one). */
+async function generationStatus(
+  s: SessionRow,
+  running: { label: string; detail: string | null; created_at: string },
+): Promise<ChatOut> {
+  const mins = Math.max(1, Math.round((Date.now() - Date.parse(running.created_at)) / 60_000));
+  return out(s, [
+    `"${running.label}" is running right now — ${mins} min in, current stage: ` +
+      `${running.detail ?? "working"}. One rewrite at a time; the result posts ` +
+      "here when it lands. The live stage shows under Background tasks — and " +
+      "if that ever reads Failed, the run died and the chip here runs it " +
+      "again. If you wanted MORE changes, send them once this pass lands.",
+  ]);
 }
 
 const SANCTION_CHIPS = [
@@ -1284,6 +1362,8 @@ async function odmReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
   const db = getDb();
   if (inp.kind === "chip") {
     if (inp.chip_id === "bench:generate") {
+      const running = await runningGeneration(s.id);
+      if (running) return generationStatus(s, running);
       // Outcome A: the market bench + product definition, per the
       // benchmark playbook — its §6 table then anchors the LLD.
       if (!s.data.lead_ref) s.data.lead_ref = await db.nextLeadRef();
@@ -1293,7 +1373,8 @@ async function odmReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
         fname = await trackTask(
           s.id,
           "Draft the benchmark report",
-          async (progress) => {
+          async (progress, taskId) => {
+            await assertSoleGeneration(s.id, taskId);
             const benchMd = await llm.generateBenchmark(
               s.data.slots,
               s.data.contact,
@@ -1340,6 +1421,8 @@ async function odmReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
       );
     }
     if (inp.chip_id === "lld:generate") {
+      const running = await runningGeneration(s.id);
+      if (running) return generationStatus(s, running);
       if (!s.data.lead_ref) s.data.lead_ref = await db.nextLeadRef();
       const transcript = await db.recentMessages(s.id, 40);
       let fname: string;
@@ -1347,7 +1430,8 @@ async function odmReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
         fname = await trackTask(
           s.id,
           "Draft the LLD",
-          async (progress) => {
+          async (progress, taskId) => {
+            await assertSoleGeneration(s.id, taskId);
             const lldMd = await llm.generateLld(
               s.data.slots,
               s.data.contact,
@@ -1412,6 +1496,10 @@ async function odmReview(s: SessionRow, inp: ChatIn): Promise<ChatOut> {
     }
   }
   if (inp.kind === "text" && inp.text) {
+    // A question while the initial draft is being written must not mutate
+    // the intake — status reply instead.
+    const running = await runningGeneration(s.id);
+    if (running) return generationStatus(s, running);
     // Treat stray text as a correction to the whole set.
     const ext = await llm.extractSlots(s.data.slots, null, inp.text);
     Object.assign(s.data.slots, ext.updates ?? {});
@@ -1991,8 +2079,26 @@ async function resume(s: SessionRow): Promise<ChatOut> {
         ? "This enquiry is filed — the last stage is project sanction. Shall I apply? Or ask me anything about it."
         : "This enquiry is filed. Ask me anything about it, or start another.",
   };
+  // Review states re-present the DOCUMENT too — after a reconnect or a
+  // reload, the draft's download card must come back with the chips.
+  const widgets: Widget[] = [];
+  if (s.state === "ODM_LLD_REVIEW" && s.data.lld_file) {
+    widgets.push(
+      card("LLD draft", s.data.lld_file, [
+        { label: "Open the LLD draft", url: `/api/download/${s.id}/${encodeURIComponent(s.data.lld_file)}` },
+      ]),
+    );
+  }
+  if (s.state === "ODM_BENCH_REVIEW" && s.data.bench_file) {
+    widgets.push(
+      card("Product Definition & Benchmark Report", s.data.bench_file, [
+        { label: "Open the report", url: `/api/download/${s.id}/${encodeURIComponent(s.data.bench_file)}` },
+      ]),
+    );
+  }
   const w = resumeWidget(s);
-  return out(s, [promptsByState[s.state] ?? "Go on…"], w ? [w] : [], { persist: false });
+  if (w) widgets.push(w);
+  return out(s, [promptsByState[s.state] ?? "Go on…"], widgets, { persist: false });
 }
 
 function resumeOdmQuestion(s: SessionRow): string {

@@ -13,17 +13,21 @@
  */
 import { getDb, type TaskRow } from "./supabase";
 
+/** Customer-visible generation steps — at most ONE of these may run per
+ *  session; shared by the orchestrator's guards and the stale-row sweep. */
+export const GEN_LABELS = /^(Draft|Revise) the (LLD|benchmark report)$/;
+
 export async function trackTask<T>(
   sessionId: string | null | undefined,
   label: string,
-  fn: (progress: (detail: string) => void) => Promise<T>,
+  fn: (progress: (detail: string) => void, taskId: string | null) => Promise<T>,
   opts?: {
     detail?: (result: T) => string | null;
     /** Static line, or derive one from the error — shown on the failed row. */
     failDetail?: string | ((err: unknown) => string);
   },
 ): Promise<T> {
-  if (!sessionId) return fn(() => undefined);
+  if (!sessionId) return fn(() => undefined, null);
   const db = getDb();
   let task: TaskRow | null = null;
   try {
@@ -38,7 +42,7 @@ export async function trackTask<T>(
     if (task) void db.updateTask(task.id, { detail }).catch(() => undefined);
   };
   try {
-    const result = await fn(progress);
+    const result = await fn(progress, task?.id ?? null);
     if (task) {
       await db
         .updateTask(task.id, { status: "completed", detail: opts?.detail?.(result) ?? null })

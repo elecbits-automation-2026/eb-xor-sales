@@ -105,6 +105,9 @@ export default function Chat() {
   const attachRef = useRef<HTMLInputElement>(null);
   // Voice conversation loop (speak → send → reply spoken → listen again).
   const voiceRef = useRef(false);
+  // Bumped on every successful render — the resync watcher stands down when
+  // a normal request has already brought the chat current.
+  const renderSeqRef = useRef(0);
   const speakRef = useRef<((text: string) => void) | null>(null);
   const listenRef = useRef<() => void>(() => undefined);
 
@@ -122,6 +125,7 @@ export default function Chat() {
   }, []);
 
   const render = useCallback((res: ChatOut) => {
+    renderSeqRef.current++;
     if (sessionRef.current !== res.session_id) emit("xor:session", res.session_id);
     sessionRef.current = res.session_id;
     try {
@@ -165,18 +169,27 @@ export default function Chat() {
   }, []);
 
   // ── transport ───────────────────────────────────────────────────────────
+  // After a dropped connection the SERVER may still finish the work — watch
+  // the background tasks and pull the result into this chat automatically
+  // instead of leaving the customer blind ("is it making changes??").
+  const resyncRef = useRef<((sid: string, opts?: { cancelOnRender?: boolean }) => void) | null>(
+    null,
+  );
+  const resyncActiveRef = useRef(false);
   const post = useCallback(
-    async (payload: Omit<ChatIn, "session_id">, sessionOverride?: string) => {
+    async (
+      payload: Omit<ChatIn, "session_id">,
+      sessionOverride?: string,
+      opts?: { fromResync?: boolean },
+    ) => {
       if (busyRef.current) return;
       busyRef.current = true;
       setBusy(true);
       setAwaiting(true);
       emit("xor:busy");
+      const sid = sessionOverride ?? sessionRef.current ?? undefined;
       try {
-        const body: ChatIn = {
-          session_id: sessionOverride ?? sessionRef.current ?? undefined,
-          ...payload,
-        };
+        const body: ChatIn = { session_id: sid, ...payload };
         const token = await getAccessToken();
         const r = await fetch("/api/chat", {
           method: "POST",
@@ -189,7 +202,23 @@ export default function Chat() {
         if (!r.ok) throw new Error(`bad status ${r.status}`);
         render((await r.json()) as ChatOut);
       } catch {
-        addMsg("Connection hiccup — please try that again.", "sys");
+        if (opts?.fromResync) {
+          // The recovery open itself failed — say so once and STOP. Re-arming
+          // here would loop two messages and a request every few seconds.
+          addMsg(
+            "Still can't reach the server — everything is saved; reload this page once your connection is back.",
+            "sys",
+          );
+        } else {
+          addMsg(
+            "The connection dropped before I could answer. If a document was " +
+              "being written, it continues on the server — I'm watching and " +
+              "will sync this chat when it settles. If nothing was running, " +
+              "just send that again.",
+            "sys",
+          );
+          if (sid) resyncRef.current?.(sid, { cancelOnRender: true });
+        }
       } finally {
         busyRef.current = false;
         setBusy(false);
@@ -200,6 +229,79 @@ export default function Chat() {
     },
     [addMsg, render],
   );
+
+  /** Poll the task feed until nothing is running, then re-open the session so
+   *  the chat shows the landed result (draft card included). Lifecycle rules,
+   *  each one a burn: never re-arm off a resync-open's own failure; a busy
+   *  settle tick RETRIES instead of dying; out-of-order responses can't fire
+   *  twice; and giving up says so instead of going silent. */
+  useEffect(() => {
+    resyncRef.current = (sid, opts) => {
+      if (resyncActiveRef.current || !sid) return;
+      resyncActiveRef.current = true;
+      const armedSeq = renderSeqRef.current;
+      let ticks = 0;
+      let done = false;
+      const finish = (msg?: string) => {
+        if (done) return;
+        done = true;
+        window.clearInterval(timer);
+        resyncActiveRef.current = false;
+        if (msg) addMsg(msg, "sys");
+      };
+      const timer = window.setInterval(async () => {
+        if (done) return;
+        if (sessionRef.current !== sid) return finish(); // switched away
+        if (opts?.cancelOnRender && renderSeqRef.current !== armedSeq) {
+          return finish(); // a normal request already brought the chat current
+        }
+        // 200 ticks ≈ 20 min — outlives the 15-min stale sweep, so a dead run
+        // gets flipped to failed and we still settle + reopen with the truth.
+        if (++ticks > 200) {
+          return finish(
+            "Still no connection after 20 minutes — reload this page when you're back online; everything is saved.",
+          );
+        }
+        try {
+          const r = await fetch(`/api/tasks?session=${encodeURIComponent(sid)}`);
+          if (!r.ok) return;
+          const b = (await r.json()) as { tasks?: { status: string }[] };
+          if (done) return; // a slow response must not fire after finish()
+          if ((b.tasks ?? []).some((t) => t.status === "running")) return; // still working
+          if (busyRef.current) return; // user mid-action — retry next tick
+          finish();
+          addMsg("Back in sync — here's where we are.", "sys");
+          void post({ kind: "open" }, sid, { fromResync: true });
+        } catch {
+          // transient — next tick retries
+        }
+      }, 6000);
+    };
+  }, [addMsg, post]);
+
+  // A page reload while a generation runs must not go blind either: once the
+  // mount settles, arm the watcher if the task feed shows live work — the
+  // settle re-open then posts the landed draft here, keeping the promise.
+  useEffect(() => {
+    let attempts = 0;
+    const timer = window.setInterval(async () => {
+      if (++attempts > 5) return window.clearInterval(timer);
+      const sid = sessionRef.current;
+      if (!sid || busyRef.current) return; // mount open still in flight
+      window.clearInterval(timer);
+      try {
+        const r = await fetch(`/api/tasks?session=${encodeURIComponent(sid)}`);
+        if (!r.ok) return;
+        const b = (await r.json()) as { tasks?: { status: string }[] };
+        if ((b.tasks ?? []).some((t) => t.status === "running")) {
+          resyncRef.current?.(sid); // no cancelOnRender: renders won't stand it down
+        }
+      } catch {
+        // best-effort — the panel still shows the run
+      }
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   // Open (or resume) the session on mount. ?new=1 forces a fresh session
   // (used by "+ New enquiry" links) and is stripped from the URL.
